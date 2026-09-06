@@ -7,6 +7,7 @@
 // convergence documentée casse ICI, pas dans le repo consommateur.
 import { describe, it, expect } from "vitest";
 import * as core from "../src/index.mjs";
+import * as conformance from "../src/conformance.mjs";
 import { PORT_CONFORMANCE } from "../src/conformance.mjs";
 import fs from "node:fs";
 import path from "node:path";
@@ -83,5 +84,40 @@ describe("conformance kit section stays in sync with PORT_CONFORMANCE", () => {
     expect(README).toContain("docs/consumer-convergence.md");
     expect(README).toContain("@ori3com/agent-core/conformance");
     expect(README).toContain("checkPortConformance");
+  });
+});
+
+describe("RuntimeBroker capstone section stays in sync with the code (C09)", () => {
+  it("documents the black-box entrypoints as real exports", () => {
+    for (const sym of ["runtimeBrokerFromEnv", "WORKLOAD_KINDS"]) {
+      expect(core[sym], `core missing '${sym}'`).toBeDefined();
+      expect(GUIDE.includes(sym), `guide missing '${sym}'`).toBe(true);
+    }
+    expect(GUIDE).toContain("broker.invoke");
+  });
+
+  it("every documented workload kind is a real WORKLOAD_KINDS entry", () => {
+    // Extrait les `kind: "…"` cités dans le guide et prouve qu'ils existent.
+    const cited = new Set(
+      [...GUIDE.matchAll(/kind:\s*["']([a-z.]+)["']/g)].map((m) => m[1])
+    );
+    expect(cited.size).toBeGreaterThan(0);
+    for (const kind of cited) {
+      expect(core.WORKLOAD_KINDS.includes(kind), `guide cites unknown kind '${kind}'`).toBe(true);
+    }
+  });
+
+  it("documents the checkpoint handoff surface + its account-keyed path", () => {
+    expect(GUIDE).toContain("broker.checkpoint");
+    expect(GUIDE).toContain("broker.restore");
+    expect(GUIDE).toContain("checkpoints/<tenant>/<project>/<user>/<stateKey>.json");
+    expect(GUIDE).toContain("PORT_UNAVAILABLE");
+  });
+
+  it("documents the broker conformance checker (a real export, kept out of PORT_CONFORMANCE)", () => {
+    expect(conformance.checkRuntimeBrokerConformance).toBeTypeOf("function");
+    expect(GUIDE).toContain("checkRuntimeBrokerConformance");
+    // La carte des ports reste exactement PORT_NAMES (le broker n'y est pas).
+    expect(Object.keys(PORT_CONFORMANCE)).not.toContain("RuntimeBroker");
   });
 });

@@ -102,6 +102,57 @@ backends generically), or import a specific checker directly. Each returns
 `{ ok, passed, failed, checks }` and never throws — a failing check reports precisely which
 behavioral guarantee the backend broke.
 
+## RuntimeBroker — the black-box capstone (C09) + checkpoint handoff
+
+Consumers don't have to wire the 8 ports by hand. `runtimeBrokerFromEnv()` is the capstone
+seam: it assembles every port via its own `fromEnv` (natives dynamic-imported, reversible
+degradation) and returns **one black-box broker**. The UI calls `broker.invoke(workload,
+ctx)` and never learns a single backend — the *placement* (local / wasm / edge / cloud) is
+opaque and only reported for observability.
+
+```js
+import { runtimeBrokerFromEnv } from "@ori3com/agent-core";
+
+const { broker, backends } = await runtimeBrokerFromEnv({ projectId: "my-app" });
+const ctx = { scope: { tenantId: "acme", userId: "u1", projectId: "my-app" } };
+await broker.invoke({ kind: "memory.remember", item: { text: "…" } }, ctx);
+const { output } = await broker.invoke({ kind: "memory.recall", query: "…", k: 3 }, ctx);
+// backends = { cognitive, vector, brain, graph, workflow, storage, llm } — effective picks
+```
+
+Workload `kind`s route to the ports (see `WORKLOAD_KINDS`): `memory.remember|recall`,
+`vector.upsert|query`, `brain.consolidate|recall`, `graph.upsert|query`, `workflow.trigger`,
+`tools.resolve`, `llm.chat`. A required-but-unwired port fails explicitly with
+`PORT_UNAVAILABLE:<port>` (never a silent trap).
+
+**Handoff by checkpoint.** Session state (`.lbug` + session, opaque JSON) is persisted on
+the `IStorageLayer` under a deterministic **account-keyed** path
+(`checkpoints/<tenant>/<project>/<user>/<stateKey>.json`). Because the key depends only on
+the scope + `stateKey` — not the placement — a broker on *any* runtime restores the same
+state, so a session started local can resume on wasm/edge/cloud transparently:
+
+```js
+await broker.checkpoint({ scope, stateKey: "conv-77" }, { lbug, draft });
+// …later, on a different placement sharing the same account-keyed storage:
+const resumed = await broker.restore({ scope, stateKey: "conv-77" }); // { state, scope, stateKey } | null
+```
+
+The checkpoint codec is pure-JS UTF-8 (no `TextEncoder`/`TextDecoder`), so it runs even in
+minimal WASM runtimes (QuickJS) — proven by the executable-WASM smoke, where a broker
+checkpoints inside WASM and another placement restores it losslessly.
+
+**Verify your own broker.** A consumer providing a *distributed* broker (real handoff)
+proves the contract the UI relies on with `checkRuntimeBrokerConformance` — invoke
+validation, unknown-kind rejection, the `{placement, kind, output}` envelope, and the
+account-keyed checkpoint round-trip + per-tenant isolation (the last three skipped
+gracefully if the broker omits `checkpoint`/`restore`):
+
+```js
+import { checkRuntimeBrokerConformance } from "@ori3com/agent-core/conformance";
+const report = await checkRuntimeBrokerConformance(() => new MyDistributedBroker());
+expect(report.ok).toBe(true);
+```
+
 ## Non-regression gate
 
 After swapping, each consumer runs its own suite; the core guarantees the contracts are
