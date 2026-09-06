@@ -13,9 +13,25 @@ export { S3PathBuilder } from "./scope.mjs";
 export { LiteLLMEmbedder, HashingEmbedder, createEmbedder } from "./embedder.mjs";
 export { RequestContext, buildRequestContext, materializeAgent } from "./agent-factory.mjs";
 
+// C03 — ICognitiveMemory unifié : fallback pur-JS TF·IDF + adapter cognee-rs (probe
+// dynamic-import) + seam `fromEnv`/DI (dégradation réversible, même contrat).
+export {
+  LocalCognitiveMemory,
+  CogneeCognitiveMemory,
+  createCognitiveMemory,
+  assertCognitiveMemory,
+  loadCognee,
+  isCogneeAvailable,
+  REQUIRED_METHODS,
+  COGNEE_PACKAGE,
+} from "./cognitive-memory.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
  * @typedef {import("./context-builder.mjs").ContextEnvelope} ContextEnvelope
  * @typedef {import("./context-builder.mjs").ContextBuilderOptions} ContextBuilderOptions
+ * @typedef {import("./ports.mjs").ICognitiveMemory} ICognitiveMemory
+ * @typedef {import("./ports.mjs").MemoryItem} MemoryItem
+ * @typedef {import("./ports.mjs").RecallHit} RecallHit
  */

@@ -40,11 +40,34 @@
  */
 
 /**
- * ICognitiveMemory — mémoire cognitive unifiée (cognee-rs + fallback pur-JS TF·IDF).
- * Contrat de haut niveau : ingérer du contenu et le rappeler par pertinence.
+ * ICognitiveMemory — mémoire cognitive unifiée = le « cerveau » inter-session
+ * (cognee-rs + fallback pur-JS TF·IDF). Contrat volontairement petit et async-first
+ * (impl : `cognitive-memory.mjs`, C03), convergé depuis l'impl P02 de o3c-code-cli.
+ *
+ * @typedef {Object} MemoryItem
+ * @property {string} id identifiant stable (assigné par l'adapter si omis)
+ * @property {string} text le contenu retenu
+ * @property {string} [kind] catégorie, ex. 'fact' | 'decision' | 'episode'
+ * @property {Record<string, unknown>} [meta] métadonnées structurées arbitraires
+ * @property {number} [ts] horloge (logique ou epoch ms) — assignée par l'adapter
+ *
+ * @typedef {Object} RecallHit
+ * @property {MemoryItem} item la mémoire rappelée
+ * @property {number} score pertinence dans [0, 1], plus haut = plus pertinent
+ *
+ * @typedef {Object} MemoryCapabilities
+ * @property {string} backend 'cognee' | 'local' | string
+ * @property {boolean} persistent survit entre process
+ * @property {boolean} semantic recall classé par sens/similarité, pas juste récence
+ * @property {boolean} native backé par un addon natif / moteur externe
+ *
  * @typedef {Object} ICognitiveMemory
- * @property {(text: string, scope: RuntimeScope, metadata?: Record<string, unknown>) => Promise<void>} add
- * @property {(query: string, scope: RuntimeScope, opts?: { topK?: number }) => Promise<Array<{ text: string, score: number, metadata?: Record<string, unknown> }>>} search
+ * @property {MemoryCapabilities} capabilities
+ * @property {(item: { text: string, id?: string, kind?: string, meta?: Record<string, unknown> }) => Promise<MemoryItem>} remember
+ * @property {(query: string, k?: number) => Promise<RecallHit[]>} recall
+ * @property {() => Promise<{ items: number }>} cognify consolide/indexe la mémoire retenue
+ * @property {() => Promise<number>} count
+ * @property {() => Promise<void>} clear
  */
 
 /**
