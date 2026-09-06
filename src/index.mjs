@@ -51,6 +51,20 @@ export {
   ZVEC_PACKAGE,
 } from "./vector-memory.mjs";
 
+// C05 — IStorageLayer : in-memory WASM-clean + fs (node:fs dynamic-import) + s3
+// (@aws-sdk/client-s3 probe) + createStorageLayer fromEnv (s3→fs→memory, réversible).
+export {
+  MemoryStorageLayer,
+  FsStorageLayer,
+  S3StorageLayer,
+  createStorageLayer,
+  storageFromEnv,
+  assertStorageLayer,
+  loadS3,
+  isS3Available,
+  S3_PACKAGE,
+} from "./storage.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
