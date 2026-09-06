@@ -10,6 +10,7 @@ import {
   checkCognitiveMemoryConformance,
   checkVectorMemoryConformance,
   checkGraphStoreConformance,
+  checkWorkflowRuntimeConformance,
 } from "../src/conformance.mjs";
 import {
   MemoryStorageLayer,
@@ -17,6 +18,7 @@ import {
   LocalCognitiveMemory,
   LocalVectorMemory,
   InMemoryGraphStore,
+  InMemoryWorkflowRuntime,
 } from "../src/index.mjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -235,5 +237,60 @@ describe("checkGraphStoreConformance", () => {
     // Le mode complet et la validation restent conformes.
     expect(report.checks.find((c) => c.name.includes("full mode"))?.ok).toBe(true);
     expect(report.checks.find((c) => c.name.includes("validates node ids"))?.ok).toBe(true);
+  });
+});
+
+describe("checkWorkflowRuntimeConformance", () => {
+  it("passes the pure-JS InMemoryWorkflowRuntime reference adapter", async () => {
+    const report = await checkWorkflowRuntimeConformance(() => new InMemoryWorkflowRuntime());
+    expect(report.ok, JSON.stringify(report.checks.filter((c) => !c.ok))).toBe(true);
+    expect(report.failed).toBe(0);
+    expect(report.passed).toBeGreaterThanOrEqual(8);
+  });
+
+  it("fails an adapter that ignores tenant scope and never runs triggers", async () => {
+    // Backend « global » : registre unique (ignore le scope → fuite) et trigger no-op.
+    function makeGlobal() {
+      const defs = new Map();
+      return {
+        async register(def) {
+          defs.set(def.id, def);
+          return def;
+        },
+        async read(id) {
+          return defs.get(id) ?? null;
+        },
+        async update(id, patch) {
+          const next = { ...defs.get(id), ...patch, id };
+          defs.set(id, next);
+          return next;
+        },
+        async delete(id) {
+          defs.delete(id);
+        },
+        async search(q) {
+          const text = q?.text?.toLowerCase();
+          const tags = q?.tags ?? [];
+          return [...defs.values()].filter((d) => {
+            if (text && !`${d.name} ${d.description ?? ""}`.toLowerCase().includes(text)) return false;
+            if (tags.length && !tags.every((t) => (d.tags ?? []).includes(t))) return false;
+            return true;
+          });
+        },
+        async trigger() {
+          return [];
+        }, // no-op → non conforme
+        async getRun() {
+          return null;
+        },
+      };
+    }
+    const report = await checkWorkflowRuntimeConformance(makeGlobal);
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("trigger() runs matched"))?.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("tenants are isolated"))?.ok).toBe(false);
+    // CRUD/search de base restent conformes sur ce stub.
+    expect(report.checks.find((c) => c.name.includes("round-trips"))?.ok).toBe(true);
+    expect(report.checks.find((c) => c.name.includes("filters by text"))?.ok).toBe(true);
   });
 });

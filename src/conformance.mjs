@@ -532,6 +532,136 @@ export async function checkGraphStoreConformance(makeGraphStore, opts = {}) {
 }
 
 /**
+ * @typedef {import("./ports.mjs").IWorkflowRuntime} IWorkflowRuntime
+ */
+
+/**
+ * Def de workflow minimale (steps vides → teste le contrat CRUD/trigger/getRun
+ * indépendamment des exécuteurs de steps, spécifiques à l'impl).
+ * @param {string} id
+ * @param {string} event
+ * @returns {any}
+ */
+function wfDef(id, event) {
+  return {
+    id,
+    name: `Nightly Sync ${id}`,
+    description: "syncs project data overnight",
+    trigger: { type: "event", event },
+    steps: [],
+    tags: ["sync", "nightly"],
+  };
+}
+
+/**
+ * Vérifie qu'un IWorkflowRuntime respecte le contrat COMPORTEMENTAL du port (Tâches,
+ * tenant-scopé) : register→read round-trip (+ read inconnu = null), update reflété,
+ * delete efface, search filtre par texte ET tags (AND), trigger d'un event matché
+ * produit des runs récupérables par getRun (event non matché ⇒ [], sans erreur), et les
+ * tenants sont ISOLÉS. Cible les consommateurs injectant un backend durable (Inngest).
+ *
+ * @param {() => (IWorkflowRuntime | Promise<IWorkflowRuntime>)} makeRuntime Fabrique un adapter frais.
+ * @param {object} [opts]
+ * @param {string} [opts.tenant] Base des tenantId de test (défaut `__conformance__`).
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkWorkflowRuntimeConformance(makeRuntime, opts = {}) {
+  const base = opts.tenant ?? "__conformance__";
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+  let seq = 0;
+
+  /**
+   * @param {string} name
+   * @param {(rt: IWorkflowRuntime, scope: RuntimeScope) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    const scope = scopeForTenant(`${base}-${seq++}`);
+    let rt;
+    try {
+      rt = await makeRuntime();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeRuntime threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      await fn(rt, scope);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    }
+  };
+
+  await run("exposes the IWorkflowRuntime method surface", async (rt) => {
+    for (const method of ["search", "register", "read", "update", "delete", "trigger", "getRun"]) {
+      if (typeof (/** @type {any} */ (rt)[method]) !== "function") throw new Error(`missing method: ${method}`);
+    }
+  });
+
+  await run("register() then read() round-trips; read(unknown) is null", async (rt, scope) => {
+    await rt.register(wfDef("wf1", "data.arrived"), scope);
+    const got = await rt.read("wf1", scope);
+    if (!got || got.id !== "wf1") throw new Error("read() did not return the registered workflow");
+    const missing = await rt.read("does-not-exist", scope);
+    if (missing !== null) throw new Error(`read(unknown) must be null, got ${JSON.stringify(missing)}`);
+  });
+
+  await run("update() is reflected by a subsequent read()", async (rt, scope) => {
+    await rt.register(wfDef("wf2", "e"), scope);
+    await rt.update("wf2", { name: "Renamed Workflow" }, scope);
+    const got = await rt.read("wf2", scope);
+    if (!got || got.name !== "Renamed Workflow") throw new Error("update() not reflected by read()");
+  });
+
+  await run("delete() removes the workflow (read then null)", async (rt, scope) => {
+    await rt.register(wfDef("wf3", "e"), scope);
+    await rt.delete("wf3", scope);
+    if ((await rt.read("wf3", scope)) !== null) throw new Error("read() must be null after delete()");
+  });
+
+  await run("search() filters by text and by tags (AND)", async (rt, scope) => {
+    await rt.register(wfDef("wf-a", "e"), scope);
+    await rt.register({ ...wfDef("wf-b", "e"), name: "Unrelated", description: "billing report", tags: ["billing"] }, scope);
+    const byText = await rt.search({ text: "sync" }, scope);
+    if (!byText.some((d) => d.id === "wf-a") || byText.some((d) => d.id === "wf-b")) {
+      throw new Error("search({text}) did not filter correctly");
+    }
+    const byTags = await rt.search({ tags: ["sync", "nightly"] }, scope);
+    if (!byTags.some((d) => d.id === "wf-a") || byTags.some((d) => d.id === "wf-b")) {
+      throw new Error("search({tags}) must AND all tags");
+    }
+    const none = await rt.search({ tags: ["no-such-tag"] }, scope);
+    if (none.length !== 0) throw new Error("search() with an unmatched tag must be empty");
+  });
+
+  await run("trigger() runs matched event workflows; getRun() retrieves the run", async (rt, scope) => {
+    await rt.register(wfDef("wf-run", "order.placed"), scope);
+    const runs = await rt.trigger("order.placed", { orderId: 42 }, scope);
+    if (!Array.isArray(runs) || runs.length === 0) throw new Error("trigger() produced no runs for a matched event");
+    const r = runs[0];
+    if (!r.id || r.workflowId !== "wf-run") throw new Error("run must carry id + workflowId");
+    const fetched = await rt.getRun(r.id, scope);
+    if (!fetched || fetched.id !== r.id) throw new Error("getRun() did not retrieve the produced run");
+  });
+
+  await run("trigger() with no matching workflow returns [] (no error)", async (rt, scope) => {
+    const runs = await rt.trigger("nobody.listens", {}, scope);
+    if (!Array.isArray(runs) || runs.length !== 0) throw new Error(`expected [], got ${JSON.stringify(runs)}`);
+  });
+
+  await run("tenants are isolated (tenant B cannot read/search tenant A's workflows)", async (rt) => {
+    const a = scopeForTenant(`${base}-iso-A-${seq++}`);
+    const b = scopeForTenant(`${base}-iso-B-${seq++}`);
+    await rt.register(wfDef("secret-wf", "e"), a);
+    if ((await rt.read("secret-wf", b)) !== null) throw new Error("tenant B read tenant A's workflow");
+    if ((await rt.search({}, b)).some((d) => d.id === "secret-wf")) throw new Error("tenant B searched into tenant A");
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
+/**
  * @param {unknown} err
  * @returns {string}
  */
