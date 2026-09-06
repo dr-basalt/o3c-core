@@ -80,7 +80,7 @@
  *
  * @typedef {Object} IVectorMemory
  * @property {(ns: string, docs: VectorDoc[]) => Promise<void>} upsert
- * @property {(ns: string, q: { text: string, vector: number[], topK?: number }) => Promise<VectorHit[]>} query
+ * @property {(ns: string, q: { text?: string, vector: number[], topK?: number }) => Promise<VectorHit[]>} query
  * @property {(ns: string, ids: string[]) => Promise<void>} delete
  */
 

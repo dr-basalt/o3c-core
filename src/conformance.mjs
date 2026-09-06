@@ -275,6 +275,130 @@ export async function checkCognitiveMemoryConformance(makeMemory, _opts = {}) {
 }
 
 /**
+ * @typedef {import("./ports.mjs").IVectorMemory} IVectorMemory
+ */
+
+/**
+ * Vérifie qu'un IVectorMemory respecte le contrat COMPORTEMENTAL du port (upsert/query/
+ * delete, partitionné par namespace) : upsert valide les docs (id + vecteur non vide),
+ * query classe le doc le PLUS PROCHE en tête (cosinus) avec un score dans (0,1] et respecte
+ * topK, les namespaces sont ISOLÉS, une query sur un ns vide/inconnu = [], et delete retire
+ * le doc des résultats. Chaque vérif utilise un namespace dédié (isolation même sur backend
+ * partagé) et nettoie derrière elle. Cible les consommateurs injectant cozo/zvec/etc.
+ *
+ * @param {() => (IVectorMemory | Promise<IVectorMemory>)} makeVectorMemory Fabrique un adapter frais.
+ * @param {object} [opts]
+ * @param {string} [opts.namespace] Base des namespaces de test (défaut `__conformance__`).
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkVectorMemoryConformance(makeVectorMemory, opts = {}) {
+  const base = opts.namespace ?? "__conformance__";
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+  let seq = 0;
+
+  /**
+   * @param {string} name
+   * @param {(m: IVectorMemory, ns: string) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    const ns = `${base}/${seq++}`;
+    let mem;
+    try {
+      mem = await makeVectorMemory();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeVectorMemory threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      await fn(mem, ns);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    } finally {
+      try {
+        const anyMem = /** @type {any} */ (mem);
+        if (typeof anyMem?.clear === "function") await anyMem.clear(ns);
+      } catch {
+        /* nettoyage best-effort */
+      }
+    }
+  };
+
+  await run("exposes the IVectorMemory method surface", async (m) => {
+    for (const method of ["upsert", "query", "delete"]) {
+      if (typeof (/** @type {any} */ (m)[method]) !== "function") {
+        throw new Error(`missing method: ${method}`);
+      }
+    }
+  });
+
+  await run("upsert() rejects a doc without a vector", async (m, ns) => {
+    let threw = false;
+    try {
+      await m.upsert(ns, [/** @type {any} */ ({ id: "novec", text: "no vector here" })]);
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error("upsert() must reject a doc missing its vector");
+  });
+
+  await run("query() ranks the nearest vector first with a score in (0,1]", async (m, ns) => {
+    await m.upsert(ns, [
+      { id: "near", text: "the near document", vector: [1, 0, 0] },
+      { id: "far", text: "the far document", vector: [0, 1, 0] },
+    ]);
+    const hits = await m.query(ns, { vector: [1, 0, 0], topK: 3 });
+    if (!Array.isArray(hits) || hits.length === 0) throw new Error("query() returned no hits");
+    if (hits[0].id !== "near") throw new Error(`nearest doc not ranked first: got ${hits[0].id}`);
+    if (!(hits[0].score > 0 && hits[0].score <= 1)) throw new Error(`score out of (0,1]: ${hits[0].score}`);
+  });
+
+  await run("query() respects the topK limit", async (m, ns) => {
+    await m.upsert(ns, [
+      { id: "a", text: "a", vector: [1, 0, 0] },
+      { id: "b", text: "b", vector: [0.9, 0.1, 0] },
+      { id: "c", text: "c", vector: [0.8, 0.2, 0] },
+    ]);
+    const hits = await m.query(ns, { vector: [1, 0, 0], topK: 1 });
+    if (hits.length > 1) throw new Error(`topK=1 but got ${hits.length} hits`);
+  });
+
+  await run("query() returns [] for an empty/unknown namespace", async (m, ns) => {
+    const hits = await m.query(`${ns}/never-written`, { vector: [1, 0, 0], topK: 5 });
+    if (!Array.isArray(hits) || hits.length !== 0) throw new Error(`expected [], got ${JSON.stringify(hits)}`);
+  });
+
+  await run("namespaces are isolated (a doc in ns A is invisible from ns B)", async (m, ns) => {
+    const nsA = `${ns}/A`;
+    const nsB = `${ns}/B`;
+    try {
+      await m.upsert(nsA, [{ id: "only-in-a", text: "scoped", vector: [1, 0, 0] }]);
+      const hits = await m.query(nsB, { vector: [1, 0, 0], topK: 5 });
+      if (hits.some((h) => h.id === "only-in-a")) throw new Error("ns B leaked a doc from ns A");
+    } finally {
+      const anyM = /** @type {any} */ (m);
+      if (typeof anyM?.clear === "function") {
+        await anyM.clear(nsA).catch(() => {});
+        await anyM.clear(nsB).catch(() => {});
+      }
+    }
+  });
+
+  await run("delete() removes a doc from subsequent query results", async (m, ns) => {
+    await m.upsert(ns, [{ id: "gone", text: "to be deleted", vector: [1, 0, 0] }]);
+    const before = await m.query(ns, { vector: [1, 0, 0], topK: 5 });
+    if (!before.some((h) => h.id === "gone")) throw new Error("doc not present before delete");
+    await m.delete(ns, ["gone"]);
+    const after = await m.query(ns, { vector: [1, 0, 0], topK: 5 });
+    if (after.some((h) => h.id === "gone")) throw new Error("delete() did not remove the doc");
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
+/**
  * @param {unknown} err
  * @returns {string}
  */

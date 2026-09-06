@@ -8,8 +8,14 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   checkStorageLayerConformance,
   checkCognitiveMemoryConformance,
+  checkVectorMemoryConformance,
 } from "../src/conformance.mjs";
-import { MemoryStorageLayer, FsStorageLayer, LocalCognitiveMemory } from "../src/index.mjs";
+import {
+  MemoryStorageLayer,
+  FsStorageLayer,
+  LocalCognitiveMemory,
+  LocalVectorMemory,
+} from "../src/index.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -132,5 +138,52 @@ describe("checkCognitiveMemoryConformance", () => {
     expect(remember?.ok).toBe(false);
     const rejectEmpty = report.checks.find((c) => c.name.includes("rejects empty"));
     expect(rejectEmpty?.ok).toBe(false);
+  });
+});
+
+describe("checkVectorMemoryConformance", () => {
+  it("passes the pure-JS LocalVectorMemory reference adapter", async () => {
+    const report = await checkVectorMemoryConformance(() => new LocalVectorMemory());
+    expect(report.ok, JSON.stringify(report.checks.filter((c) => !c.ok))).toBe(true);
+    expect(report.failed).toBe(0);
+    expect(report.passed).toBeGreaterThanOrEqual(7);
+  });
+
+  it("fails an adapter that leaks across namespaces and never deletes", async () => {
+    // Backend « global » : ignore le ns (une seule partition) et delete no-op.
+    function makeGlobal() {
+      const docs = new Map();
+      return {
+        capabilities: { backend: "global-stub", persistent: false, semantic: true, native: false },
+        async upsert(_ns, ds) {
+          for (const d of ds) {
+            if (!d?.id || !Array.isArray(d.vector) || d.vector.length === 0) {
+              throw new Error("bad doc");
+            }
+            docs.set(d.id, d);
+          }
+        },
+        async query(_ns, q) {
+          // Ignore le ns → fuite entre namespaces ; classe quand même par cosinus.
+          const out = [];
+          for (const d of docs.values()) {
+            let dot = 0, na = 0, nb = 0;
+            for (let i = 0; i < q.vector.length; i++) {
+              dot += q.vector[i] * d.vector[i]; na += q.vector[i] ** 2; nb += d.vector[i] ** 2;
+            }
+            const score = na && nb ? dot / Math.sqrt(na * nb) : 0;
+            if (score > 0) out.push({ id: d.id, score, text: d.text });
+          }
+          return out.sort((a, b) => b.score - a.score).slice(0, q.topK ?? 5);
+        },
+        async delete() {}, // no-op → non conforme
+      };
+    }
+    const report = await checkVectorMemoryConformance(makeGlobal);
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("namespaces are isolated"))?.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("delete() removes"))?.ok).toBe(false);
+    // La query/ranking de base reste conforme sur ce stub.
+    expect(report.checks.find((c) => c.name.includes("ranks the nearest"))?.ok).toBe(true);
   });
 });
