@@ -399,6 +399,139 @@ export async function checkVectorMemoryConformance(makeVectorMemory, opts = {}) 
 }
 
 /**
+ * @typedef {import("./ports.mjs").IGraphStore} IGraphStore
+ * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
+ */
+
+/**
+ * Scope minimal pour un tenant donné (le graphe n'isole que par `tenantId`).
+ * @param {string} tenantId
+ * @returns {RuntimeScope}
+ */
+function scopeForTenant(tenantId) {
+  return { tenantId, userId: "u", projectId: "p", agentId: "a", threadId: "th" };
+}
+
+/**
+ * Vérifie qu'un IGraphStore respecte le contrat COMPORTEMENTAL du port (GraphRAG,
+ * tenant-scopé) : upsert valide (id de nœud, extrémités d'arête) et matérialise les
+ * extrémités absentes, query en mode complet/nœud-unique remonte nœuds+arêtes, la
+ * traversée voisins respecte la profondeur (BFS borné), et les tenants sont ISOLÉS.
+ * Cible les consommateurs injectant un backend durable (cognee-rs/Neo4j/KùzuDB).
+ *
+ * @param {() => (IGraphStore | Promise<IGraphStore>)} makeGraphStore Fabrique un adapter frais.
+ * @param {object} [opts]
+ * @param {string} [opts.tenant] Base des tenantId de test (défaut `__conformance__`).
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkGraphStoreConformance(makeGraphStore, opts = {}) {
+  const base = opts.tenant ?? "__conformance__";
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+  let seq = 0;
+
+  /**
+   * @param {string} name
+   * @param {(g: IGraphStore, scope: RuntimeScope) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    const scope = scopeForTenant(`${base}-${seq++}`);
+    let graph;
+    try {
+      graph = await makeGraphStore();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeGraphStore threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      await fn(graph, scope);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    }
+  };
+
+  /** @param {{nodes: any[]}} res @param {string} id */
+  const hasNode = (res, id) => Array.isArray(res.nodes) && res.nodes.some((n) => n.id === id);
+
+  await run("exposes the IGraphStore method surface", async (g) => {
+    for (const method of ["upsert", "query"]) {
+      if (typeof (/** @type {any} */ (g)[method]) !== "function") throw new Error(`missing method: ${method}`);
+    }
+  });
+
+  await run("upsert() validates node ids and edge endpoints", async (g, scope) => {
+    let nodeThrew = false;
+    try {
+      await g.upsert([/** @type {any} */ ({ type: "no-id" })], [], scope);
+    } catch {
+      nodeThrew = true;
+    }
+    if (!nodeThrew) throw new Error("upsert() must reject a node without an id");
+    let edgeThrew = false;
+    try {
+      await g.upsert([], [/** @type {any} */ ({ type: "dangling" })], scope);
+    } catch {
+      edgeThrew = true;
+    }
+    if (!edgeThrew) throw new Error("upsert() must reject an edge without from/to");
+  });
+
+  await run("query() (full mode) returns upserted nodes and edges", async (g, scope) => {
+    await g.upsert(
+      [{ id: "n1", type: "doc" }, { id: "n2", type: "doc" }],
+      [{ from: "n1", to: "n2", type: "rel" }],
+      scope,
+    );
+    const res = await g.query({}, scope);
+    if (!hasNode(res, "n1") || !hasNode(res, "n2")) throw new Error("full query missing upserted nodes");
+    if (!res.edges.some((e) => e.from === "n1" && e.to === "n2")) throw new Error("full query missing the edge");
+  });
+
+  await run("query({node}) returns the node with its incident edges", async (g, scope) => {
+    await g.upsert(
+      [{ id: "a" }, { id: "b" }, { id: "c" }],
+      [{ from: "a", to: "b", type: "r" }, { from: "b", to: "c", type: "r" }],
+      scope,
+    );
+    const res = await g.query({ node: "b" }, scope);
+    if (!hasNode(res, "b")) throw new Error("single-node query missing the node");
+    const incident = res.edges.filter((e) => e.from === "b" || e.to === "b");
+    if (incident.length < 2) throw new Error(`expected 2 incident edges, got ${incident.length}`);
+  });
+
+  await run("query({neighbors,depth}) respects the BFS depth bound", async (g, scope) => {
+    await g.upsert(
+      [{ id: "a" }, { id: "b" }, { id: "c" }],
+      [{ from: "a", to: "b", type: "r" }, { from: "b", to: "c", type: "r" }],
+      scope,
+    );
+    const d1 = await g.query({ neighbors: "a", depth: 1 }, scope);
+    if (!hasNode(d1, "b")) throw new Error("depth 1 must reach the direct neighbour b");
+    if (hasNode(d1, "c")) throw new Error("depth 1 must NOT reach the 2-hop node c");
+    const d2 = await g.query({ neighbors: "a", depth: 2 }, scope);
+    if (!hasNode(d2, "c")) throw new Error("depth 2 must reach the 2-hop node c");
+  });
+
+  await run("upsert() materializes missing edge endpoints", async (g, scope) => {
+    await g.upsert([], [{ from: "x", to: "y", type: "r" }], scope);
+    const res = await g.query({ node: "x" }, scope);
+    if (!hasNode(res, "x")) throw new Error("edge endpoint x was not materialized");
+  });
+
+  await run("tenants are isolated (tenant B cannot see tenant A's graph)", async (g) => {
+    const a = scopeForTenant(`${base}-iso-A-${seq++}`);
+    const b = scopeForTenant(`${base}-iso-B-${seq++}`);
+    await g.upsert([{ id: "secret" }], [], a);
+    const res = await g.query({}, b);
+    if (hasNode(res, "secret")) throw new Error("tenant B leaked tenant A's node");
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
+/**
  * @param {unknown} err
  * @returns {string}
  */

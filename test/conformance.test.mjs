@@ -9,12 +9,14 @@ import {
   checkStorageLayerConformance,
   checkCognitiveMemoryConformance,
   checkVectorMemoryConformance,
+  checkGraphStoreConformance,
 } from "../src/conformance.mjs";
 import {
   MemoryStorageLayer,
   FsStorageLayer,
   LocalCognitiveMemory,
   LocalVectorMemory,
+  InMemoryGraphStore,
 } from "../src/index.mjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -185,5 +187,53 @@ describe("checkVectorMemoryConformance", () => {
     expect(report.checks.find((c) => c.name.includes("delete() removes"))?.ok).toBe(false);
     // La query/ranking de base reste conforme sur ce stub.
     expect(report.checks.find((c) => c.name.includes("ranks the nearest"))?.ok).toBe(true);
+  });
+});
+
+describe("checkGraphStoreConformance", () => {
+  it("passes the pure-JS InMemoryGraphStore reference adapter", async () => {
+    const report = await checkGraphStoreConformance(() => new InMemoryGraphStore());
+    expect(report.ok, JSON.stringify(report.checks.filter((c) => !c.ok))).toBe(true);
+    expect(report.failed).toBe(0);
+    expect(report.passed).toBeGreaterThanOrEqual(7);
+  });
+
+  it("fails an adapter that ignores tenant scope and depth (leaks + unbounded BFS)", async () => {
+    // Backend « plat » : un seul graphe global (ignore le scope) et voisins non bornés.
+    function makeFlat() {
+      const nodes = new Map();
+      const edges = [];
+      return {
+        capabilities: { backend: "flat-stub", persistent: false, native: false },
+        async upsert(ns, es) {
+          for (const n of ns || []) {
+            if (!n?.id) throw new Error("node needs id");
+            nodes.set(n.id, n);
+          }
+          for (const e of es || []) {
+            if (!e?.from || !e?.to) throw new Error("edge needs from/to");
+            if (!nodes.has(e.from)) nodes.set(e.from, { id: e.from });
+            if (!nodes.has(e.to)) nodes.set(e.to, { id: e.to });
+            edges.push(e);
+          }
+        },
+        async query(q) {
+          // Ignore scope (fuite) ; pour {neighbors} renvoie TOUT (BFS non borné).
+          if (q?.node !== undefined) {
+            const inc = edges.filter((e) => e.from === q.node || e.to === q.node);
+            const ids = new Set([q.node, ...inc.flatMap((e) => [e.from, e.to])]);
+            return { nodes: [...ids].map((id) => nodes.get(id)).filter(Boolean), edges: inc };
+          }
+          return { nodes: [...nodes.values()], edges: [...edges] };
+        },
+      };
+    }
+    const report = await checkGraphStoreConformance(makeFlat);
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("tenants are isolated"))?.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("BFS depth bound"))?.ok).toBe(false);
+    // Le mode complet et la validation restent conformes.
+    expect(report.checks.find((c) => c.name.includes("full mode"))?.ok).toBe(true);
+    expect(report.checks.find((c) => c.name.includes("validates node ids"))?.ok).toBe(true);
   });
 });
