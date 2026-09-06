@@ -906,6 +906,41 @@ export async function checkToolResolverConformance(makeResolver, opts = {}) {
   return { ok: failed === 0, passed: checks.length - failed, failed, checks };
 }
 
+// ── Registre + dispatcher — un vérificateur par port substituable ──────────────
+
+/**
+ * Registre port → vérificateur de conformité. Les clés reflètent EXACTEMENT `PORT_NAMES`
+ * (ADR-0001 §1) : un test de dérive garantit qu'aucun port substituable ne reste sans
+ * vérificateur. Un consommateur itère dessus pour prouver TOUS ses backends injectés d'un
+ * coup (`for (const [port, make] of Object.entries(myAdapters)) checkPortConformance(...)`).
+ * @type {Readonly<Record<string, (make: () => any, opts?: object) => Promise<ConformanceReport>>>}
+ */
+export const PORT_CONFORMANCE = Object.freeze({
+  ICognitiveMemory: checkCognitiveMemoryConformance,
+  IVectorMemory: checkVectorMemoryConformance,
+  IBrainMemory: checkBrainMemoryConformance,
+  IGraphStore: checkGraphStoreConformance,
+  IToolResolver: checkToolResolverConformance,
+  IWorkflowRuntime: checkWorkflowRuntimeConformance,
+  Embedder: checkEmbedderConformance,
+  IStorageLayer: checkStorageLayerConformance,
+});
+
+/**
+ * Lance la conformité du port `portName` contre l'adapter produit par `makeAdapter`.
+ * @param {string} portName Un nom de `PORT_NAMES`.
+ * @param {() => any} makeAdapter Fabrique un adapter frais du bon type.
+ * @param {object} [opts] Options passées au vérificateur (ex. `prefix`/`tenant`/`namespace`).
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkPortConformance(portName, makeAdapter, opts = {}) {
+  const checker = PORT_CONFORMANCE[portName];
+  if (!checker) {
+    throw new Error(`checkPortConformance: no conformance checker for port '${portName}'`);
+  }
+  return checker(makeAdapter, opts);
+}
+
 /**
  * @param {unknown} err
  * @returns {string}

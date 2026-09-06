@@ -14,6 +14,8 @@ import {
   checkBrainMemoryConformance,
   checkEmbedderConformance,
   checkToolResolverConformance,
+  checkPortConformance,
+  PORT_CONFORMANCE,
 } from "../src/conformance.mjs";
 import {
   MemoryStorageLayer,
@@ -27,6 +29,7 @@ import {
   StaticToolResolver,
   EmptyToolResolver,
 } from "../src/index.mjs";
+import { PORT_NAMES } from "../src/ports.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -399,5 +402,28 @@ describe("checkToolResolverConformance", () => {
     const report = await checkToolResolverConformance(() => throwy);
     expect(report.ok).toBe(false);
     expect(report.checks.find((c) => c.name.includes("degrades gracefully"))?.ok).toBe(false);
+  });
+});
+
+describe("PORT_CONFORMANCE registry + checkPortConformance dispatcher", () => {
+  it("covers EXACTLY the canonical PORT_NAMES (no port without a checker)", () => {
+    expect(Object.keys(PORT_CONFORMANCE).sort()).toEqual([...PORT_NAMES].sort());
+  });
+
+  it("every registered checker is a function", () => {
+    for (const [port, checker] of Object.entries(PORT_CONFORMANCE)) {
+      expect(typeof checker, `checker for ${port}`).toBe("function");
+    }
+  });
+
+  it("dispatches by port name to the matching checker", async () => {
+    const report = await checkPortConformance("IStorageLayer", () => new MemoryStorageLayer());
+    expect(report.ok).toBe(true);
+    const brain = await checkPortConformance("IBrainMemory", () => new InMemoryBrainMemory());
+    expect(brain.ok).toBe(true);
+  });
+
+  it("throws for an unknown port name", async () => {
+    await expect(checkPortConformance("INotAPort", () => ({}))).rejects.toThrow(/no conformance checker/);
   });
 });
