@@ -7,6 +7,15 @@
 // convergence documentée casse ICI, pas dans le repo consommateur.
 import { describe, it, expect } from "vitest";
 import * as core from "../src/index.mjs";
+import { PORT_CONFORMANCE } from "../src/conformance.mjs";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const GUIDE = fs.readFileSync(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../docs/consumer-convergence.md"),
+  "utf-8",
+);
 
 /**
  * Carte de convergence : par consommateur, chaque impl dupliquée → le symbole
@@ -55,5 +64,19 @@ describe("consumer convergence map (docs/consumer-convergence.md)", () => {
 
   it("the map covers both C08 consumers named in ADR-0001 §4", () => {
     expect(Object.keys(CONVERGENCE).sort()).toEqual(["chat2-agent-runtime", "o3c-code-cli"]);
+  });
+});
+
+describe("conformance kit section stays in sync with PORT_CONFORMANCE", () => {
+  it("the guide documents every port + its checker (no drift)", () => {
+    for (const [port, checker] of Object.entries(PORT_CONFORMANCE)) {
+      expect(GUIDE.includes(port), `guide missing port '${port}'`).toBe(true);
+      expect(GUIDE.includes(checker.name), `guide missing checker '${checker.name}'`).toBe(true);
+    }
+  });
+
+  it("documents the checkPortConformance dispatcher entrypoint", () => {
+    expect(GUIDE).toContain("checkPortConformance");
+    expect(GUIDE).toContain("@ori3com/agent-core/conformance");
   });
 });

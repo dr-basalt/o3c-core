@@ -69,8 +69,42 @@ return new Agent({ id: bp.id, name: bp.name, instructions: bp.instructions, mode
 (drizzle/`@ori3com/db`) and the concrete `litellm()` provider — these are the consumer's
 injected backends, not shared core.
 
+## Conformance kit — verify your own injected backends
+
+The parity ITs cover the core's reference adapters. But each consumer injects its *own*
+durable backends behind the substitutable ports (S3/object-store, cognee-rs, cozo/zvec,
+Neo4j, Inngest, LanceDB, LiteLLM, Nango/MCP). `@ori3com/agent-core/conformance` ships a
+framework-agnostic behavioral checker per port so a consumer proves its backend satisfies
+the port contract inside its own runner — no vitest/jest dependency in the kit:
+
+```js
+import { checkPortConformance } from "@ori3com/agent-core/conformance";
+const report = await checkPortConformance("IVectorMemory", () => new MyCozoVectorMemory());
+expect(report.ok).toBe(true); // report.checks = one {name, ok, error?} per behavioral assertion
+```
+
+One checker per substitutable port (registry keyed exactly to `PORT_NAMES`, so no port can
+lack a checker):
+
+| Port              | Checker                             |
+| ----------------- | ----------------------------------- |
+| `ICognitiveMemory` | `checkCognitiveMemoryConformance`  |
+| `IVectorMemory`    | `checkVectorMemoryConformance`     |
+| `IBrainMemory`     | `checkBrainMemoryConformance`      |
+| `IGraphStore`      | `checkGraphStoreConformance`       |
+| `IToolResolver`    | `checkToolResolverConformance`     |
+| `IWorkflowRuntime` | `checkWorkflowRuntimeConformance`  |
+| `Embedder`         | `checkEmbedderConformance`         |
+| `IStorageLayer`    | `checkStorageLayerConformance`     |
+
+Use `checkPortConformance(portName, makeAdapter)` to dispatch by name (iterate all your
+backends generically), or import a specific checker directly. Each returns
+`{ ok, passed, failed, checks }` and never throws — a failing check reports precisely which
+behavioral guarantee the backend broke.
+
 ## Non-regression gate
 
 After swapping, each consumer runs its own suite; the core guarantees the contracts are
-identical via the parity ITs listed above. A consumer swap that changes observable
-behaviour will diverge from these pinned contracts.
+identical via the parity ITs listed above, and each injected backend is verified by the
+conformance kit. A consumer swap that changes observable behaviour will diverge from these
+pinned contracts.
