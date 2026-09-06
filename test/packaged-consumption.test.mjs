@@ -18,8 +18,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 /** Consumer script exercising the package strictly through its public `exports` map. */
 const CONSUMER = `
-import { VERSION, LocalCognitiveMemory, ContextBuilder, S3PathBuilder } from "@ori3com/agent-core";
+import { VERSION, LocalCognitiveMemory, ContextBuilder, S3PathBuilder, MemoryStorageLayer } from "@ori3com/agent-core";
 import { PORT_NAMES } from "@ori3com/agent-core/ports";
+import { checkStorageLayerConformance } from "@ori3com/agent-core/conformance";
 
 const mem = new LocalCognitiveMemory();
 await mem.remember({ text: "the core is consumed identically by every channel" });
@@ -34,12 +35,15 @@ const key = new S3PathBuilder({
   tenantId: "t", userId: "u", projectId: "p", agentId: "a", threadId: "th",
 }).message(3);
 
+const conformance = await checkStorageLayerConformance(() => new MemoryStorageLayer());
+
 process.stdout.write(JSON.stringify({
   version: VERSION,
   portCount: PORT_NAMES.length,
   topHit: hits[0]?.item.text ?? null,
   systemPrompt: env.systemPrompt,
   messageKey: key,
+  conformanceOk: conformance.ok,
 }));
 `;
 
@@ -87,6 +91,10 @@ describe("packaged consumption — npm i @ori3com/agent-core", () => {
 
   it("resolves the './ports' export (all 8 substitutable ports present)", () => {
     expect(consumerOut.portCount).toBe(8);
+  });
+
+  it("resolves the './conformance' export (consumer port-conformance kit)", () => {
+    expect(consumerOut.conformanceOk).toBe(true);
   });
 
   it("ships src/ in the `files` allowlist so the exports targets actually exist", () => {
