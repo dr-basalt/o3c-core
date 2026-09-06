@@ -1,0 +1,19 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # devDependencies (esbuild/typescript/vitest) sont requises → include=dev
+      # explicite (les runners peuvent porter NODE_ENV=production).
+      - run: npm install --include=dev
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
