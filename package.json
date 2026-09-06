@@ -6,17 +6,23 @@
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/dr-basalt/o3c-core.git" },
   "engines": { "node": ">=20" },
-  "exports": { ".": "./src/index.mjs" },
+  "exports": {
+    ".": "./src/index.mjs",
+    "./ports": "./src/ports.mjs"
+  },
   "files": ["src", "README.md", "LICENSE"],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit --checkJs --allowJs src/*.mjs || true",
+    "typecheck": "tsc -p tsconfig.json",
     "build": "node build.mjs"
   },
   "optionalDependencies": {
     "@cognee/cognee-ts": "^0.2.0"
   },
   "devDependencies": {
+    "@types/node": "^20.19.0",
+    "esbuild": "^0.24.0",
+    "typescript": "~5.6.3",
     "vitest": "^2.1.9"
   },
   "keywords": ["ori3com", "agent", "mastra", "cognee", "memory", "graphrag", "portable", "edge"]
