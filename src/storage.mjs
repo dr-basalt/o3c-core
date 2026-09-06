@@ -428,10 +428,11 @@ function isNoSuchKey(err) {
  * @param {'auto'|'s3'|'fs'|'memory'} [opts.prefer] préférence backend (défaut env ou 'auto')
  * @param {string} [opts.root] racine fs (défaut env STORAGE_FS_ROOT)
  * @param {S3StorageConfig} [opts.s3] config S3 explicite (défaut lue depuis l'env)
+ * @param {Record<string, string | undefined>} [opts.env] env (défaut process.env)
  * @returns {Promise<CreateStorageLayerResult>}
  */
 export async function createStorageLayer(opts = {}) {
-  const env = typeof process !== "undefined" && process.env ? process.env : {};
+  const env = opts.env || (typeof process !== "undefined" && process.env ? process.env : {});
   const prefer = opts.prefer || envPrefer(env["STORAGE_PROVIDER"]);
   const s3Config = opts.s3 || s3ConfigFromEnv(env);
   const root = opts.root || env["STORAGE_FS_ROOT"];

@@ -116,6 +116,16 @@ export {
   assertGraphStore,
 } from "./graph-store.mjs";
 
+// C09 — RuntimeBroker : point d'entrée boîte-noire `invoke(workload, ctx)` (placement
+// opaque à l'IHM) composant les 8 ports C05. runtimeBrokerFromEnv = capstone des seams.
+export {
+  LocalRuntimeBroker,
+  createRuntimeBroker,
+  runtimeBrokerFromEnv,
+  assertRuntimeBroker,
+  WORKLOAD_KINDS,
+} from "./runtime-broker.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
