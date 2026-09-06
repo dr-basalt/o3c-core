@@ -116,3 +116,62 @@ describe("consumer parity — chat2 agent-runtime canal-agnostic core", () => {
     expect(() => p.fileRaw("../")).toThrow(/Invalid filename/);
   });
 });
+
+describe("consumer parity — chat2 agent-factory (Mastra Agent construction seam)", () => {
+  /** @type {import("../src/agent-spec.mjs").AgentSpec} */
+  const spec = {
+    id: "a1",
+    name: "Copilot",
+    persona: "Helpful copilot.",
+    systemPrompt: "Answer precisely.",
+    defaultModel: "o3c-equilibre",
+    temperature: 0.3,
+    tenantId: "t1",
+    projectId: "p1",
+  };
+  const envelope = { systemPrompt: "## Instructions\nAnswer precisely.", persona: null };
+
+  it("buildRequestContext propagates EXACTLY the 5 scope keys chat2 tools read", () => {
+    const ctx = core.buildRequestContext(scope);
+    // chat2 agent-factory.ts : tenantId/projectId/userId/agentId/threadId (Nango tools).
+    for (const [k, v] of Object.entries(scope)) {
+      expect(ctx.get(k)).toBe(v);
+      expect(ctx.has(k)).toBe(true);
+    }
+    // Rien d'autre n'est propagé (isolation) : pas de fuite de clés surnuméraires.
+    expect(ctx._store.size).toBe(5);
+    expect(ctx.has("secret")).toBe(false);
+  });
+
+  it("materializeAgent blueprint carries the exact fields chat2 passes to new Agent({...})", () => {
+    // chat2 litellm() est INJECTÉ ici via le seam modelProvider (C04) — le core ne
+    // hard-dépend jamais de @ai-sdk/@mastra ; le consommateur garde ces deps chez lui.
+    const litellm = (id) => ({ __model: id, provider: "litellm" });
+    const tools = { search: () => {}, fetchUrl: () => {} };
+    const bp = core.materializeAgent(spec, envelope, { modelProvider: litellm, tools });
+
+    // Reconstitue l'objet EXACT que chat2 fournit à `new Agent(...)` depuis le blueprint.
+    const agentInput = {
+      id: bp.id,
+      name: bp.name,
+      instructions: bp.instructions,
+      model: bp.model,
+      tools: bp.tools,
+    };
+    expect(agentInput).toEqual({
+      id: "a1",
+      name: "Copilot",
+      instructions: "## Instructions\nAnswer precisely.",
+      model: { __model: "o3c-equilibre", provider: "litellm" },
+      tools,
+    });
+    // Le blueprint est un SUR-ensemble (porte aussi temperature, appliquée au stream côté run).
+    expect(bp.temperature).toBe(0.3);
+  });
+
+  it("materializeAgent defaults tools to {} and keeps the raw model id without a provider", () => {
+    const bp = core.materializeAgent(spec, envelope);
+    expect(bp.tools).toEqual({});
+    expect(bp.model).toBe("o3c-equilibre");
+  });
+});
