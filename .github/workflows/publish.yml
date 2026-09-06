@@ -1,0 +1,33 @@
+name: publish
+# C07 — Publication npm de @ori3com/agent-core, gated `NPM_TOKEN`.
+# Déclenchée par un tag `v*` (ex. v0.1.0) OU manuellement. Le `prepublishOnly`
+# (typecheck + test + verify:build + leakscan) est un hard-gate exécuté par `npm
+# publish` lui-même. `--provenance` attache l'attestation de provenance (chaîne
+# d'approvisionnement) ; requiert `id-token: write` + registry npmjs.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # provenance (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm install --include=dev
+      # Refuse-vite si le secret de publication est absent (jamais un publish silencieux).
+      - name: Ensure NPM_TOKEN is configured
+        run: test -n "$NODE_AUTH_TOKEN" || (echo "NPM_TOKEN secret is required to publish" && exit 1)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # `npm publish` déclenche `prepublishOnly` (gate) puis pousse avec provenance +
+      # accès public (package scopé @ori3com).
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
