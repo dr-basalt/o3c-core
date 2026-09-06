@@ -140,10 +140,11 @@
  */
 
 /**
- * IWorkflowRuntime — exécution/orchestration de workflows (inngest & co, substituable).
- * @typedef {Object} IWorkflowRuntime
- * @property {(name: string, input: unknown, scope: RuntimeScope) => Promise<unknown>} run
- * @property {(name: string, cron: string, input: unknown, scope: RuntimeScope) => Promise<void>} [schedule]
+ * IWorkflowRuntime — exécution/orchestration durable de workflows (Tâches : trigger
+ * + steps ordonnés). Contrat riche (CRUD + trigger + getRun) défini et implémenté en
+ * `workflow-runtime.mjs` (C05) : impl in-memory pure-JS par défaut, backend durable
+ * (Inngest) substituable par injection. Re-référencé ici pour tenir le registre unique.
+ * @typedef {import("./workflow-runtime.mjs").IWorkflowRuntime} IWorkflowRuntime
  */
 
 /**

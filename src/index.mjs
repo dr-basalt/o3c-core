@@ -77,6 +77,20 @@ export {
   assertToolResolver,
 } from "./tool-resolver.mjs";
 
+// C05 — IWorkflowRuntime (Tâches = trigger + steps) : InMemoryWorkflowRuntime pur-JS
+// (scope-isolé, durable-en-mémoire) + dispatcher de steps (seam Mastra, exécuteurs
+// injectés) + isCronDue (planif pure) + createWorkflowRuntime/fromEnv (durable injecté).
+export {
+  InMemoryWorkflowRuntime,
+  createWorkflowStepHandler,
+  createWorkflowRuntime,
+  workflowRuntimeFromEnv,
+  assertWorkflowRuntime,
+  isCronDue,
+  isWorkflowStepKind,
+  WORKFLOW_STEP_KINDS,
+} from "./workflow-runtime.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
