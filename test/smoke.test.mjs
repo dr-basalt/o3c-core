@@ -1,6 +1,13 @@
 // C01 smoke — la surface publique s'importe et expose les contrats de ports.
 import { describe, it, expect } from "vitest";
-import { VERSION, PORT_NAMES } from "../src/index.mjs";
+import {
+  VERSION,
+  PORT_NAMES,
+  createCognitiveMemory,
+  createVectorMemory,
+  createEmbedder,
+  llmFromEnv,
+} from "../src/index.mjs";
 
 describe("@ori3com/agent-core public surface", () => {
   it("exposes VERSION", () => {
@@ -22,5 +29,11 @@ describe("@ori3com/agent-core public surface", () => {
 
   it("keeps the port registry immutable", () => {
     expect(Object.isFrozen(PORT_NAMES)).toBe(true);
+  });
+
+  it("exposes a `fromEnv` seam for every substitutable backend port", () => {
+    for (const seam of [createCognitiveMemory, createVectorMemory, createEmbedder, llmFromEnv]) {
+      expect(typeof seam).toBe("function");
+    }
   });
 });

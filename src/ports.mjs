@@ -75,6 +75,7 @@
  * @typedef {Object} VectorHit
  * @property {string} id
  * @property {number} score
+ * @property {string} [text] contenu du doc (extra de commodité au-delà du port strict)
  * @property {Record<string, unknown>} [metadata]
  *
  * @typedef {Object} IVectorMemory

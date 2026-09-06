@@ -37,6 +37,20 @@ export {
   modelProviderFromEnv,
 } from "./llm.mjs";
 
+// C05 — seams `fromEnv` des backends substituables (memory/vector/graph/storage),
+// natives en dynamic-import (jamais tirées quand non utilisées). IVectorMemory :
+// fallback pur-JS cosinus dense + adapter natif zvec (probe) + createVectorMemory.
+export {
+  LocalVectorMemory,
+  ZvecVectorMemory,
+  createVectorMemory,
+  vectorMemoryFromEnv,
+  assertVectorMemory,
+  loadZvec,
+  isZvecAvailable,
+  ZVEC_PACKAGE,
+} from "./vector-memory.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
