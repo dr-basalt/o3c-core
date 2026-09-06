@@ -46,6 +46,15 @@ sur certains hôtes → fallback/WASM · publication gated `NPM_TOKEN`.
 - **C07 — Publication npm** `@ori3com/agent-core` (files allowlist, provenance, leakscan) — gated `NPM_TOKEN`.
 - **C08 — Convergence consommateurs** : o3c-code-cli + chat2 `agent-runtime` dépendent de `@ori3com/agent-core`
   (retirer les impls dupliquées) ; IT de non-régression côté consommateurs.
+- **C09 — Cible WASM EXÉCUTABLE + hook RuntimeBroker** (au-delà du « wasm-friendly » de C06) : produire un
+  artefact `@ori3com/agent-core` **réellement exécutable en WASM** (navigateur / Cloudflare Worker / WebVM) —
+  cœur Mastra+ports en WASM, cognee-rs via son core Rust→WASM (fallback pur-JS sinon), LLM via fetch
+  `api.ori3com.cloud`. **DoD** : un smoke réel « import + `remember`/`recall` » tourne **dans un runtime WASM**
+  (ex. Node avec WASI ou headless-browser), pas seulement « ne casse pas ». Exposer l'interface
+  **`RuntimeBroker`** (`invoke(workload, ctx)`) que l'IHM appelle en boîte-noire — le placement/handoff
+  (local/wasm/webvm/edge/cloud) est opaque au frontend (cf. `ADR-o3c-portability-handoff.md`). L'état
+  `.lbug`+session reste **portable sur storage account-keyed** → handoff par checkpoint. Sans hôte glibc/WASM
+  dispo → STATUS=DEPTH-BLOCKED reason=wasm-runtime, jamais DONE sur un « ne casse pas ».
 
 ## 5. Loop autonome `autonome-o3c-core` (cron OpenClaw fly)
 
