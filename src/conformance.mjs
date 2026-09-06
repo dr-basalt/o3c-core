@@ -780,6 +780,133 @@ export async function checkBrainMemoryConformance(makeBrain, opts = {}) {
 }
 
 /**
+ * @typedef {import("./ports.mjs").Embedder} Embedder
+ */
+
+/**
+ * Vérifie qu'un Embedder respecte le contrat COMPORTEMENTAL du port : `dims` entier > 0,
+ * embed([]) = [], embed(texts) rend UN vecteur par texte, chaque vecteur a exactement
+ * `dims` composantes finies. Cible les consommateurs injectant un embedder distant
+ * (LiteLLM/api.ori3com.cloud) ou local.
+ *
+ * @param {() => (Embedder | Promise<Embedder>)} makeEmbedder Fabrique un embedder frais.
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkEmbedderConformance(makeEmbedder) {
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+
+  /**
+   * @param {string} name
+   * @param {(e: Embedder) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    let emb;
+    try {
+      emb = await makeEmbedder();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeEmbedder threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      await fn(emb);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    }
+  };
+
+  await run("exposes embed() and a positive integer dims", async (e) => {
+    if (typeof (/** @type {any} */ (e).embed) !== "function") throw new Error("missing method: embed");
+    if (!Number.isInteger(e.dims) || e.dims <= 0) throw new Error(`dims must be a positive integer, got ${e.dims}`);
+  });
+
+  await run("embed([]) returns []", async (e) => {
+    const out = await e.embed([]);
+    if (!Array.isArray(out) || out.length !== 0) throw new Error(`expected [], got ${JSON.stringify(out)}`);
+  });
+
+  await run("embed(texts) returns one vector per input text", async (e) => {
+    const out = await e.embed(["alpha", "beta", "gamma"]);
+    if (!Array.isArray(out) || out.length !== 3) throw new Error(`expected 3 vectors, got ${Array.isArray(out) ? out.length : typeof out}`);
+  });
+
+  await run("each vector has exactly `dims` finite numeric components", async (e) => {
+    const out = await e.embed(["the shared canal-agnostic core"]);
+    const v = out[0];
+    if (!Array.isArray(v)) throw new Error("embed() must return arrays of numbers");
+    if (v.length !== e.dims) throw new Error(`vector length ${v.length} !== dims ${e.dims}`);
+    if (!v.every((x) => typeof x === "number" && Number.isFinite(x))) throw new Error("vector has non-finite components");
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
+/**
+ * @typedef {import("./ports.mjs").IToolResolver} IToolResolver
+ */
+
+/**
+ * Vérifie qu'un IToolResolver respecte le contrat COMPORTEMENTAL du port : resolveTools
+ * rend un Record simple (jamais null/array) et DÉGRADE gracieusement — jamais de hard-fail,
+ * même non configuré (ADR §3 : `{}` au pire). Cible les consommateurs injectant un backend
+ * de tools (Nango/MCP), qui doit rester silencieux quand indisponible.
+ *
+ * @param {() => (IToolResolver | Promise<IToolResolver>)} makeResolver Fabrique un resolver frais.
+ * @param {object} [opts]
+ * @param {string} [opts.tenant] Base des tenantId de test (défaut `__conformance__`).
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkToolResolverConformance(makeResolver, opts = {}) {
+  const base = opts.tenant ?? "__conformance__";
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+  let seq = 0;
+
+  /**
+   * @param {string} name
+   * @param {(r: IToolResolver, scope: RuntimeScope) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    const scope = scopeForTenant(`${base}-${seq++}`);
+    let resolver;
+    try {
+      resolver = await makeResolver();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeResolver threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      await fn(resolver, scope);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    }
+  };
+
+  await run("exposes the resolveTools method", async (r) => {
+    if (typeof (/** @type {any} */ (r).resolveTools) !== "function") throw new Error("missing method: resolveTools");
+  });
+
+  await run("resolveTools() returns a plain object (never null/array)", async (r, scope) => {
+    const tools = await r.resolveTools(scope);
+    if (tools === null || typeof tools !== "object" || Array.isArray(tools)) {
+      throw new Error(`resolveTools() must return a plain object, got ${Array.isArray(tools) ? "array" : tools === null ? "null" : typeof tools}`);
+    }
+  });
+
+  await run("resolveTools() degrades gracefully (never throws)", async (r, scope) => {
+    // Le port exige une dégradation en `{}` plutôt qu'un hard-fail — un throw ici casse la
+    // matérialisation d'agent. On invoque et on laisse toute exception faire échouer la vérif.
+    await r.resolveTools(scope);
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
+/**
  * @param {unknown} err
  * @returns {string}
  */

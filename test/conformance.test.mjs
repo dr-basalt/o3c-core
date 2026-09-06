@@ -12,6 +12,8 @@ import {
   checkGraphStoreConformance,
   checkWorkflowRuntimeConformance,
   checkBrainMemoryConformance,
+  checkEmbedderConformance,
+  checkToolResolverConformance,
 } from "../src/conformance.mjs";
 import {
   MemoryStorageLayer,
@@ -21,6 +23,9 @@ import {
   InMemoryGraphStore,
   InMemoryWorkflowRuntime,
   InMemoryBrainMemory,
+  HashingEmbedder,
+  StaticToolResolver,
+  EmptyToolResolver,
 } from "../src/index.mjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -350,5 +355,49 @@ describe("checkBrainMemoryConformance", () => {
     // policy round-trip, recall filtre + forget restent conformes.
     expect(report.checks.find((c) => c.name.includes("setPolicy() merges"))?.ok).toBe(true);
     expect(report.checks.find((c) => c.name.includes("filters by kind"))?.ok).toBe(true);
+  });
+});
+
+describe("checkEmbedderConformance", () => {
+  it("passes the pure-JS HashingEmbedder reference adapter", async () => {
+    const report = await checkEmbedderConformance(() => new HashingEmbedder({ dims: 64 }));
+    expect(report.ok, JSON.stringify(report.checks.filter((c) => !c.ok))).toBe(true);
+    expect(report.failed).toBe(0);
+    expect(report.passed).toBe(4);
+  });
+
+  it("fails an embedder whose vectors don't match its declared dims", async () => {
+    const badDims = {
+      dims: 8,
+      async embed(texts) {
+        return texts.map(() => [1, 2, 3]); // longueur 3 ≠ dims 8
+      },
+    };
+    const report = await checkEmbedderConformance(() => badDims);
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("finite numeric components"))?.ok).toBe(false);
+  });
+});
+
+describe("checkToolResolverConformance", () => {
+  it("passes the EmptyToolResolver (graceful {} degradation)", async () => {
+    const report = await checkToolResolverConformance(() => new EmptyToolResolver());
+    expect(report.ok, JSON.stringify(report.checks.filter((c) => !c.ok))).toBe(true);
+  });
+
+  it("passes the StaticToolResolver", async () => {
+    const report = await checkToolResolverConformance(() => new StaticToolResolver({ search: () => {} }));
+    expect(report.ok).toBe(true);
+  });
+
+  it("fails a resolver that throws instead of degrading to {}", async () => {
+    const throwy = {
+      async resolveTools() {
+        throw new Error("backend down");
+      },
+    };
+    const report = await checkToolResolverConformance(() => throwy);
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("degrades gracefully"))?.ok).toBe(false);
   });
 });
