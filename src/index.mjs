@@ -11,6 +11,7 @@ export { PORT_NAMES } from "./ports.mjs";
 export { ContextBuilder } from "./context-builder.mjs";
 export { S3PathBuilder } from "./scope.mjs";
 export { LiteLLMEmbedder, HashingEmbedder, createEmbedder } from "./embedder.mjs";
+export { RequestContext, buildRequestContext, materializeAgent } from "./agent-factory.mjs";
 
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
