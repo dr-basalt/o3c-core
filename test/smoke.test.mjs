@@ -5,7 +5,12 @@ import {
   PORT_NAMES,
   createCognitiveMemory,
   createVectorMemory,
+  createBrainMemory,
+  createGraphStore,
+  createToolResolver,
+  createWorkflowRuntime,
   createEmbedder,
+  createStorageLayer,
   llmFromEnv,
 } from "../src/index.mjs";
 
@@ -31,8 +36,18 @@ describe("@ori3com/agent-core public surface", () => {
     expect(Object.isFrozen(PORT_NAMES)).toBe(true);
   });
 
-  it("exposes a `fromEnv` seam for every substitutable backend port", () => {
-    for (const seam of [createCognitiveMemory, createVectorMemory, createEmbedder, llmFromEnv]) {
+  it("exposes a factory/`fromEnv` seam for all 8 substitutable ports (ADR-0001 §1)", () => {
+    for (const seam of [
+      createCognitiveMemory, // ICognitiveMemory
+      createVectorMemory, // IVectorMemory
+      createBrainMemory, // IBrainMemory
+      createGraphStore, // IGraphStore
+      createToolResolver, // IToolResolver
+      createWorkflowRuntime, // IWorkflowRuntime
+      createEmbedder, // Embedder
+      createStorageLayer, // IStorageLayer
+      llmFromEnv, // LLM seam (C04)
+    ]) {
       expect(typeof seam).toBe("function");
     }
   });

@@ -106,6 +106,16 @@ export {
   DEFAULT_META_AGENT_POLICY,
 } from "./brain-memory.mjs";
 
+// C05 — IGraphStore (GraphRAG) : InMemoryGraphStore pur-JS WASM-clean (scope-isolé,
+// upsert idempotent + traversée BFS bornée) + createGraphStore/fromEnv (backend durable
+// cognee-rs/Neo4j injecté, non bundlé — parité IWorkflowRuntime/IBrainMemory).
+export {
+  InMemoryGraphStore,
+  createGraphStore,
+  graphStoreFromEnv,
+  assertGraphStore,
+} from "./graph-store.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope

@@ -124,10 +124,11 @@
  */
 
 /**
- * IGraphStore — magasin de graphe (GraphRAG), substituable derrière le port.
- * @typedef {Object} IGraphStore
- * @property {(nodes: unknown[], edges: unknown[], scope: RuntimeScope) => Promise<void>} upsert
- * @property {(query: unknown, scope: RuntimeScope) => Promise<unknown>} query
+ * IGraphStore — magasin de graphe (GraphRAG), substituable derrière le port. Contrat
+ * riche (upsert nœuds/arêtes + traversée BFS) défini et implémenté en `graph-store.mjs`
+ * (C05) : impl in-memory pure-JS par défaut, backend durable (cognee-rs/Neo4j/KùzuDB)
+ * substituable par injection. Re-référencé ici pour tenir le registre unique.
+ * @typedef {import("./graph-store.mjs").IGraphStore} IGraphStore
  */
 
 /**
