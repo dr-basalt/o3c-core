@@ -10,6 +10,7 @@ export { PORT_NAMES } from "./ports.mjs";
 // C02 — couche domaine pure, découplée de tout o3c-chat (pas de DB, pas d'I/O).
 export { ContextBuilder } from "./context-builder.mjs";
 export { S3PathBuilder } from "./scope.mjs";
+export { LiteLLMEmbedder, HashingEmbedder, createEmbedder } from "./embedder.mjs";
 
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
