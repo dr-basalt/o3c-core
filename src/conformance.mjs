@@ -662,6 +662,124 @@ export async function checkWorkflowRuntimeConformance(makeRuntime, opts = {}) {
 }
 
 /**
+ * @typedef {import("./ports.mjs").IBrainMemory} IBrainMemory
+ */
+
+/**
+ * Vérifie qu'un IBrainMemory respecte le contrat COMPORTEMENTAL du port (cerveau
+ * consolidé + méta-agent, tenant-scopé) : getPolicy/setPolicy round-trip, consolidate
+ * retenu par recall (texte, kinds, topK), consolidate HONORE le seuil de salience de la
+ * policy (accepted/rejected), forget efface, et les tenants sont ISOLÉS. Cible les
+ * consommateurs injectant un backend durable (LanceDB, S3-stored).
+ *
+ * @param {() => (IBrainMemory | Promise<IBrainMemory>)} makeBrain Fabrique un adapter frais.
+ * @param {object} [opts]
+ * @param {string} [opts.tenant] Base des tenantId de test (défaut `__conformance__`).
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkBrainMemoryConformance(makeBrain, opts = {}) {
+  const base = opts.tenant ?? "__conformance__";
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+  let seq = 0;
+
+  /**
+   * @param {string} name
+   * @param {(b: IBrainMemory, scope: RuntimeScope) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    const scope = scopeForTenant(`${base}-${seq++}`);
+    let brain;
+    try {
+      brain = await makeBrain();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeBrain threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      await fn(brain, scope);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    }
+  };
+
+  /** @param {any[]} hits @param {string} id */
+  const hasHit = (hits, id) => Array.isArray(hits) && hits.some((h) => h.id === id);
+
+  await run("exposes the IBrainMemory method surface", async (b) => {
+    for (const method of ["consolidate", "recall", "forget", "getPolicy", "setPolicy"]) {
+      if (typeof (/** @type {any} */ (b)[method]) !== "function") throw new Error(`missing method: ${method}`);
+    }
+  });
+
+  await run("getPolicy() returns a policy object; setPolicy() merges + is reflected", async (b, scope) => {
+    const p0 = await b.getPolicy(scope);
+    if (!p0 || typeof p0 !== "object") throw new Error("getPolicy() must return a policy object");
+    const merged = await b.setPolicy({ consolidationThreshold: 0.5 }, scope);
+    if (!merged || merged.consolidationThreshold !== 0.5) throw new Error("setPolicy() must return the merged policy");
+    const p1 = await b.getPolicy(scope);
+    if (p1.consolidationThreshold !== 0.5) throw new Error("setPolicy() not reflected by getPolicy()");
+  });
+
+  await run("consolidate() is retained and retrievable by recall({text})", async (b, scope) => {
+    await b.consolidate([{ id: "m1", content: "we deploy with kubernetes on hetzner", kind: "semantic" }], scope);
+    const hits = await b.recall({ text: "kubernetes" }, scope);
+    if (!hasHit(hits, "m1")) throw new Error("recall({text}) did not retrieve the consolidated record");
+  });
+
+  await run("consolidate() honours the policy salience threshold", async (b, scope) => {
+    await b.setPolicy({ consolidationThreshold: 0.5 }, scope);
+    const res = await b.consolidate(
+      [
+        { id: "lo", content: "low salience", kind: "semantic", salience: 0.1 },
+        { id: "hi", content: "high salience", kind: "semantic", salience: 0.9 },
+      ],
+      scope,
+    );
+    if (!Array.isArray(res?.accepted) || !Array.isArray(res?.rejected)) {
+      throw new Error("consolidate() must return { accepted, rejected } arrays");
+    }
+    if (!res.accepted.includes("hi")) throw new Error("above-threshold record must be accepted");
+    if (!res.rejected.includes("lo")) throw new Error("below-threshold record must be rejected");
+  });
+
+  await run("recall() filters by kind and respects topK", async (b, scope) => {
+    await b.consolidate(
+      [
+        { id: "s1", content: "semantic one", kind: "semantic" },
+        { id: "s2", content: "semantic two", kind: "semantic" },
+        { id: "e1", content: "episodic one", kind: "episodic" },
+      ],
+      scope,
+    );
+    const semantic = await b.recall({ kinds: ["semantic"] }, scope);
+    if (hasHit(semantic, "e1")) throw new Error("recall({kinds}) leaked an off-kind record");
+    if (!hasHit(semantic, "s1") || !hasHit(semantic, "s2")) throw new Error("recall({kinds}) dropped matching records");
+    const limited = await b.recall({ topK: 1 }, scope);
+    if (limited.length > 1) throw new Error(`topK=1 but got ${limited.length} hits`);
+  });
+
+  await run("forget() removes a record from subsequent recall", async (b, scope) => {
+    await b.consolidate([{ id: "gone", content: "temporary brain record", kind: "semantic" }], scope);
+    await b.forget(["gone"], scope);
+    const hits = await b.recall({ text: "temporary" }, scope);
+    if (hasHit(hits, "gone")) throw new Error("forget() did not remove the record");
+  });
+
+  await run("tenants are isolated (tenant B cannot recall tenant A's brain)", async (b) => {
+    const a = scopeForTenant(`${base}-iso-A-${seq++}`);
+    const t = scopeForTenant(`${base}-iso-B-${seq++}`);
+    await b.consolidate([{ id: "secret", content: "confidential memory", kind: "semantic" }], a);
+    const hits = await b.recall({ text: "confidential" }, t);
+    if (hasHit(hits, "secret")) throw new Error("tenant B recalled tenant A's brain record");
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
+/**
  * @param {unknown} err
  * @returns {string}
  */

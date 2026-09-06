@@ -11,6 +11,7 @@ import {
   checkVectorMemoryConformance,
   checkGraphStoreConformance,
   checkWorkflowRuntimeConformance,
+  checkBrainMemoryConformance,
 } from "../src/conformance.mjs";
 import {
   MemoryStorageLayer,
@@ -19,6 +20,7 @@ import {
   LocalVectorMemory,
   InMemoryGraphStore,
   InMemoryWorkflowRuntime,
+  InMemoryBrainMemory,
 } from "../src/index.mjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -292,5 +294,61 @@ describe("checkWorkflowRuntimeConformance", () => {
     // CRUD/search de base restent conformes sur ce stub.
     expect(report.checks.find((c) => c.name.includes("round-trips"))?.ok).toBe(true);
     expect(report.checks.find((c) => c.name.includes("filters by text"))?.ok).toBe(true);
+  });
+});
+
+describe("checkBrainMemoryConformance", () => {
+  it("passes the pure-JS InMemoryBrainMemory reference adapter", async () => {
+    const report = await checkBrainMemoryConformance(() => new InMemoryBrainMemory());
+    expect(report.ok, JSON.stringify(report.checks.filter((c) => !c.ok))).toBe(true);
+    expect(report.failed).toBe(0);
+    expect(report.passed).toBeGreaterThanOrEqual(7);
+  });
+
+  it("fails an adapter that ignores the salience threshold and tenant scope", async () => {
+    // Backend « naïf » : accepte TOUT (ignore le seuil) et ignore le scope (fuite).
+    function makeNaive() {
+      const recs = new Map();
+      let policy = { consolidationThreshold: 0, recallTopK: 8 };
+      return {
+        async getPolicy() {
+          return { ...policy };
+        },
+        async setPolicy(patch) {
+          policy = { ...policy, ...patch };
+          return { ...policy };
+        },
+        async consolidate(records) {
+          // Ignore le seuil → tout est accepté.
+          const accepted = [];
+          for (const r of records) {
+            recs.set(r.id, r);
+            accepted.push(r.id);
+          }
+          return { accepted, rejected: [] };
+        },
+        async recall(query) {
+          // Ignore le scope (fuite) ; filtre texte/kinds/topK.
+          const text = query?.text?.toLowerCase();
+          const kinds = query?.kinds ? new Set(query.kinds) : undefined;
+          let hits = [...recs.values()].filter((r) => {
+            if (kinds && !kinds.has(r.kind)) return false;
+            if (text && !String(r.content).toLowerCase().includes(text)) return false;
+            return true;
+          });
+          return hits.slice(0, query?.topK ?? policy.recallTopK).map((r) => ({ id: r.id, content: r.content, kind: r.kind, salience: r.salience ?? 1, score: 1 }));
+        },
+        async forget(ids) {
+          for (const id of ids) recs.delete(id);
+        },
+      };
+    }
+    const report = await checkBrainMemoryConformance(makeNaive);
+    expect(report.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("salience threshold"))?.ok).toBe(false);
+    expect(report.checks.find((c) => c.name.includes("tenants are isolated"))?.ok).toBe(false);
+    // policy round-trip, recall filtre + forget restent conformes.
+    expect(report.checks.find((c) => c.name.includes("setPolicy() merges"))?.ok).toBe(true);
+    expect(report.checks.find((c) => c.name.includes("filters by kind"))?.ok).toBe(true);
   });
 });
