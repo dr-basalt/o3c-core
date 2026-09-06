@@ -12,10 +12,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const GUIDE = fs.readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../docs/consumer-convergence.md"),
-  "utf-8",
-);
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const GUIDE = fs.readFileSync(path.join(ROOT, "docs/consumer-convergence.md"), "utf-8");
+const README = fs.readFileSync(path.join(ROOT, "README.md"), "utf-8");
 
 /**
  * Carte de convergence : par consommateur, chaque impl dupliquée → le symbole
@@ -78,5 +77,11 @@ describe("conformance kit section stays in sync with PORT_CONFORMANCE", () => {
   it("documents the checkPortConformance dispatcher entrypoint", () => {
     expect(GUIDE).toContain("checkPortConformance");
     expect(GUIDE).toContain("@ori3com/agent-core/conformance");
+  });
+
+  it("the README front door points to the convergence guide + conformance kit", () => {
+    expect(README).toContain("docs/consumer-convergence.md");
+    expect(README).toContain("@ori3com/agent-core/conformance");
+    expect(README).toContain("checkPortConformance");
   });
 });
