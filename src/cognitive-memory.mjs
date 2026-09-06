@@ -549,3 +549,73 @@ export async function createCognitiveMemory(opts = {}) {
 function envPrefer(v) {
   return v === "cognee" || v === "local" ? v : "auto";
 }
+
+// ── buildMemorySeed — seed de prompt inter-session (C08, convergence consommateurs) ─
+
+/**
+ * Rendu une-ligne d'un item retenu pour le seed de prompt.
+ * @param {MemoryItem} item
+ * @returns {string}
+ */
+function renderSeedItem(item) {
+  const kind = item.kind || "fact";
+  const text = String(item.text || "").replace(/\s+/g, " ").trim().slice(0, 200);
+  return `- [${kind}] ${text}`;
+}
+
+/**
+ * Construit un bloc « recall » pour le prompt système d'un agent : les items les plus
+ * récents que le cerveau cognitif a retenus des sessions précédentes. Surface la mémoire
+ * inter-session dans le prompt, en complément du chemin recall à la demande. Canal-agnostique
+ * et DI-first : accepte un `memory` déjà construit, sinon en construit un via
+ * `createCognitiveMemory` (même seam/env). Best-effort — retourne '' quand le cerveau est
+ * vide, indisponible, ou que le backend ne sait pas énumérer les items récents (ex. cognee-rs
+ * n'expose pas `recent`). Extrait de l'impl P02 de o3c-code-cli, découplé de tout CLI-specific.
+ * @param {object} [opts]
+ * @param {ICognitiveMemory} [opts.memory] mémoire déjà construite (DI) ; sinon construite via createCognitiveMemory
+ * @param {string} [opts.projectId] namespace du cerveau (défaut 'default')
+ * @param {'auto'|'cognee'|'local'} [opts.prefer] préférence backend
+ * @param {IStorageLayer} [opts.storage] persistance JSONL du fallback local (optionnel)
+ * @param {string} [opts.key] clé de stockage du fallback local (optionnel)
+ * @param {number} [opts.limit] nombre max d'items listés (défaut 8)
+ * @returns {Promise<string>} un bloc markdown, ou '' quand vide/indisponible
+ */
+export async function buildMemorySeed(opts = {}) {
+  const limit = typeof opts.limit === "number" ? opts.limit : 8;
+
+  /** @type {ICognitiveMemory | undefined} */
+  let memory = opts.memory;
+  let backend = memory ? memory.capabilities?.backend || "unknown" : "";
+  if (!memory) {
+    try {
+      const built = await createCognitiveMemory({
+        projectId: opts.projectId,
+        prefer: opts.prefer,
+        storage: opts.storage,
+        key: opts.key,
+      });
+      memory = built.memory;
+      backend = built.backend;
+    } catch {
+      return "";
+    }
+  }
+
+  // `recent` n'est pas dans REQUIRED_METHODS : certains backends (cognee-rs) ne l'exposent pas.
+  if (typeof (/** @type {any} */ (memory).recent) !== "function") return "";
+
+  /** @type {MemoryItem[] | undefined} */
+  let items;
+  try {
+    items = await (/** @type {any} */ (memory).recent(limit));
+  } catch {
+    return "";
+  }
+  if (!items || !items.length) return "";
+
+  return (
+    `## Memory from earlier sessions (${backend}: ${items.length} items)\n` +
+    "What prior sessions on this project retained (use recall for details):\n" +
+    items.map(renderSeedItem).join("\n")
+  );
+}

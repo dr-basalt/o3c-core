@@ -19,6 +19,7 @@ export {
   LocalCognitiveMemory,
   CogneeCognitiveMemory,
   createCognitiveMemory,
+  buildMemorySeed,
   assertCognitiveMemory,
   loadCognee,
   isCogneeAvailable,
