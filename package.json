@@ -1,0 +1,23 @@
+{
+  "name": "@ori3com/agent-core",
+  "version": "0.0.0",
+  "description": "Shared canal-agnostic agent core — Mastra orchestration + substitutable ports (memory/vector/graph/tools/workflow/storage) + api.ori3com.cloud LLM seam. Consumed identically by o3c-code-cli, o3c-work, o3c-browser, chat2, mcp.",
+  "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/dr-basalt/o3c-core.git" },
+  "engines": { "node": ">=20" },
+  "exports": { ".": "./src/index.mjs" },
+  "files": ["src", "README.md", "LICENSE"],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --checkJs --allowJs src/*.mjs || true",
+    "build": "node build.mjs"
+  },
+  "optionalDependencies": {
+    "@cognee/cognee-ts": "^0.2.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
+  },
+  "keywords": ["ori3com", "agent", "mastra", "cognee", "memory", "graphrag", "portable", "edge"]
+}
