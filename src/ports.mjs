@@ -116,13 +116,11 @@
  */
 
 /**
- * IBrainMemory — mémoire consolidée + méta-agent, scope-isolée par tenantId.
- * @typedef {Object} IBrainMemory
- * @property {(records: unknown[], scope: RuntimeScope) => Promise<unknown>} consolidate
- * @property {(query: unknown, scope: RuntimeScope) => Promise<unknown[]>} recall
- * @property {(ids: string[], scope: RuntimeScope) => Promise<void>} forget
- * @property {(scope: RuntimeScope) => Promise<unknown>} getPolicy
- * @property {(patch: unknown, scope: RuntimeScope) => Promise<unknown>} setPolicy
+ * IBrainMemory — mémoire consolidée + méta-agent, scope-isolée par tenantId. Contrat
+ * riche (consolidate/recall/forget + policy) défini et implémenté en `brain-memory.mjs`
+ * (C05) : impl in-memory pure-JS par défaut, backend durable (LanceDB, S3-stored)
+ * substituable par injection. Re-référencé ici pour tenir le registre unique.
+ * @typedef {import("./brain-memory.mjs").IBrainMemory} IBrainMemory
  */
 
 /**

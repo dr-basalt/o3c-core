@@ -91,6 +91,21 @@ export {
   WORKFLOW_STEP_KINDS,
 } from "./workflow-runtime.mjs";
 
+// C05 — IBrainMemory (mémoire consolidée + méta-agent) : InMemoryBrainMemory pur-JS
+// (scope-isolé, rappel déterministe, policy) + helpers de contexte + createBrainMemory/
+// fromEnv (backend durable LanceDB injecté, non bundlé — parité IWorkflowRuntime).
+export {
+  InMemoryBrainMemory,
+  createBrainMemory,
+  brainMemoryFromEnv,
+  assertBrainMemory,
+  formatBrainRecall,
+  composeBrainContext,
+  isBrainMemoryKind,
+  BRAIN_MEMORY_KINDS,
+  DEFAULT_META_AGENT_POLICY,
+} from "./brain-memory.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
