@@ -5,9 +5,10 @@
 // quel placement (local / wasm / webvm / edge / cloud) lit le MÊME checkpoint → le
 // handoff est transparent pour l'IHM (elle ne connaît ni le backend, ni le placement).
 //
-// Pur-TS, WASM-clean : TextEncoder/TextDecoder (globals web), aucun import `node:`.
-// L'état est OPAQUE au core (arbitraire sérialisable-JSON) — le core ne fait que le
-// persister/restaurer, jamais l'interpréter (doctrine §2 : pas de logique canal).
+// Pur-TS, WASM-clean : codec UTF-8 pur-JS (ni TextEncoder/TextDecoder — absents de
+// certains runtimes WASM minimaux comme QuickJS —, ni import `node:`). Seul `Uint8Array`
+// est requis (builtin ECMAScript). L'état est OPAQUE au core (arbitraire sérialisable-
+// JSON) — le core ne fait que le persister/restaurer, jamais l'interpréter (doctrine §2).
 
 /**
  * @typedef {import("./ports.mjs").RuntimeScope} RuntimeScope
@@ -19,6 +20,76 @@ export const CHECKPOINT_VERSION = 1;
 
 /** Préfixe racine des checkpoints dans le storage. */
 export const CHECKPOINT_PREFIX = "checkpoints";
+
+/**
+ * Encode une chaîne en UTF-8 (Uint8Array), sans dépendre de TextEncoder (absent de
+ * QuickJS-WASM & co). Portable sur tout runtime ECMAScript.
+ * @param {string} str
+ * @returns {Uint8Array}
+ */
+export function utf8Encode(str) {
+  const s = String(str);
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    let cp = s.charCodeAt(i);
+    // Recompose une paire de substitution en code point.
+    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < s.length) {
+      const lo = s.charCodeAt(i + 1);
+      if (lo >= 0xdc00 && lo <= 0xdfff) {
+        cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00);
+        i++;
+      }
+    }
+    if (cp < 0x80) {
+      out.push(cp);
+    } else if (cp < 0x800) {
+      out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    } else if (cp < 0x10000) {
+      out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    } else {
+      out.push(
+        0xf0 | (cp >> 18),
+        0x80 | ((cp >> 12) & 0x3f),
+        0x80 | ((cp >> 6) & 0x3f),
+        0x80 | (cp & 0x3f)
+      );
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+/**
+ * Décode un Uint8Array UTF-8 en chaîne, sans dépendre de TextDecoder.
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+export function utf8Decode(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; ) {
+    const b0 = bytes[i++];
+    let cp;
+    if (b0 < 0x80) {
+      cp = b0;
+    } else if (b0 < 0xe0) {
+      cp = ((b0 & 0x1f) << 6) | (bytes[i++] & 0x3f);
+    } else if (b0 < 0xf0) {
+      cp = ((b0 & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
+    } else {
+      cp =
+        ((b0 & 0x07) << 18) |
+        ((bytes[i++] & 0x3f) << 12) |
+        ((bytes[i++] & 0x3f) << 6) |
+        (bytes[i++] & 0x3f);
+    }
+    if (cp > 0xffff) {
+      cp -= 0x10000;
+      out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
+    } else {
+      out += String.fromCharCode(cp);
+    }
+  }
+  return out;
+}
 
 /**
  * Contexte d'un checkpoint : scope d'isolation + pointeur d'état portable.
@@ -91,7 +162,7 @@ export async function saveCheckpoint(storage, ctx, state) {
     stateKey,
     state,
   };
-  const bytes = new TextEncoder().encode(JSON.stringify(envelope));
+  const bytes = utf8Encode(JSON.stringify(envelope));
   await storage.put(key, bytes);
   return { key, envelope };
 }
@@ -113,7 +184,7 @@ export async function loadCheckpoint(storage, ctx) {
   const key = checkpointKey(ctx.scope, ctx.stateKey || "default");
   const bytes = await storage.get(key);
   if (!bytes) return null;
-  const text = new TextDecoder().decode(bytes);
+  const text = utf8Decode(bytes);
   /** @type {CheckpointEnvelope} */
   let env;
   try {

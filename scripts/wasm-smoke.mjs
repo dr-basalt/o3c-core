@@ -17,7 +17,7 @@ const root = resolve(fileURLToPath(import.meta.url), "..", "..");
 // globalThis.__result (ou l'erreur dans __err). N'utilise que des builtins ECMAScript
 // (le chemin local des ports est pur : ni node:, ni fetch, ni TextEncoder requis).
 const SCENARIO = `
-import { createCognitiveMemory, runtimeBrokerFromEnv, VERSION } from 'agent-core';
+import { createCognitiveMemory, runtimeBrokerFromEnv, LocalRuntimeBroker, MemoryStorageLayer, VERSION } from 'agent-core';
 globalThis.__result = null; globalThis.__err = null;
 (async () => {
   try {
@@ -34,12 +34,25 @@ globalThis.__result = null; globalThis.__err = null;
     await broker.invoke({ kind: 'memory.remember', item: { text: 'noise about the weather' } }, ctx);
     const via = await broker.invoke({ kind: 'memory.recall', query: 'broker webassembly', k: 1 }, ctx);
 
+    // 3) Handoff par checkpoint DANS le runtime WASM (codec UTF-8 pur-JS, sans
+    // TextEncoder/TextDecoder absents de QuickJS). Un broker écrit l'état sur un
+    // storage account-keyed, un AUTRE broker (placement distinct, MÊME storage) le
+    // restaure — le handoff traverse la frontière runtime, opaque à l'appelant.
+    const storage = new MemoryStorageLayer();
+    const cpCtx = { scope: { tenantId: 'acct', projectId: 'wasm-smoke' }, stateKey: 'conv-1' };
+    const writer = new LocalRuntimeBroker({ storage, placement: 'wasm' });
+    await writer.checkpoint(cpCtx, { lbug: { pc: 7 }, draft: 'résumé ✅ élève' });
+    const reader = new LocalRuntimeBroker({ storage, placement: 'edge' });
+    const restored = await reader.restore(cpCtx);
+
     globalThis.__result = JSON.stringify({
       version: VERSION,
       backend,
       directTop: direct[0] && direct[0].item.text,
       brokerPlacement: via.placement,
       brokerTop: via.output[0] && via.output[0].item.text,
+      checkpointDraft: restored && restored.state && restored.state.draft,
+      checkpointPc: restored && restored.state && restored.state.lbug && restored.state.lbug.pc,
     });
   } catch (e) { globalThis.__err = String((e && e.message) || e); }
 })();
@@ -101,10 +114,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (!/webassembly/.test(result.brokerTop || "")) {
       throw new Error(`unexpected broker recall: ${result.brokerTop}`);
     }
-    console.log(`wasm-smoke: import + remember/recall ran in ${engine} ✓`);
+    // Le handoff par checkpoint (avec codec UTF-8 pur-JS) a franchi la frontière WASM
+    // sans perte, y compris sur des caractères multi-octets / emoji.
+    if (result.checkpointDraft !== "résumé ✅ élève" || result.checkpointPc !== 7) {
+      throw new Error(`unexpected checkpoint restore: ${JSON.stringify(result)}`);
+    }
+    console.log(`wasm-smoke: import + remember/recall + checkpoint handoff ran in ${engine} ✓`);
     console.log(`  version=${result.version} backend=${result.backend} placement=${result.brokerPlacement}`);
     console.log(`  direct="${result.directTop}"`);
     console.log(`  broker="${result.brokerTop}"`);
+    console.log(`  checkpoint(restored across WASM)="${result.checkpointDraft}" pc=${result.checkpointPc}`);
   } catch (err) {
     console.error(`wasm-smoke: FAILED — ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);

@@ -11,6 +11,8 @@ import {
   deleteCheckpoint,
   listCheckpoints,
   checkpointKey,
+  utf8Encode,
+  utf8Decode,
   CHECKPOINT_VERSION,
   CHECKPOINT_PREFIX,
 } from "../src/session-checkpoint.mjs";
@@ -47,6 +49,19 @@ describe("checkpointKey", () => {
 
   it("requires a tenantId (the account key)", () => {
     expect(() => checkpointKey(/** @type {any} */ ({}), "s")).toThrow(/tenantId/);
+  });
+});
+
+describe("utf8 codec (WASM-portable, no TextEncoder/TextDecoder)", () => {
+  it("round-trips ASCII, multibyte and astral (emoji) code points", () => {
+    for (const s of ["", "hello", "résumé élève", "→ ✅ café", "𝕏 emoji 😀🚀", "ünïçödé"]) {
+      expect(utf8Decode(utf8Encode(s))).toBe(s);
+    }
+  });
+
+  it("agrees byte-for-byte with the platform TextEncoder", () => {
+    const s = "résumé ✅ élève 😀";
+    expect(Array.from(utf8Encode(s))).toEqual(Array.from(new TextEncoder().encode(s)));
   });
 });
 

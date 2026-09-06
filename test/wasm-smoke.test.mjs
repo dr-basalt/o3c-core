@@ -26,4 +26,12 @@ describe("C09 — core executes inside a real WASM runtime", () => {
     expect(result.brokerPlacement).toBe("local");
     expect(result.brokerTop).toMatch(/webassembly/);
   }, 60_000);
+
+  it("performs a checkpoint handoff across placements inside WASM (pure-JS UTF-8, no TextEncoder)", async () => {
+    const { result } = await runWasmSmoke();
+    // État écrit par un broker 'wasm', restauré par un broker 'edge' via le même
+    // storage account-keyed — multi-octets/emoji préservés par le codec pur-JS.
+    expect(result.checkpointDraft).toBe("résumé ✅ élève");
+    expect(result.checkpointPc).toBe(7);
+  }, 60_000);
 });
