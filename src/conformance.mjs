@@ -153,6 +153,128 @@ export async function checkStorageLayerConformance(makeStorage, opts = {}) {
 }
 
 /**
+ * @typedef {import("./ports.mjs").ICognitiveMemory} ICognitiveMemory
+ */
+
+/**
+ * Vérifie qu'un ICognitiveMemory respecte le contrat COMPORTEMENTAL du port — le port sur
+ * lequel les DEUX consommateurs C08 convergent (o3c-code-cli, chat2). Au-delà de la forme
+ * (`assertCognitiveMemory`) : remember valide/persiste + incrémente count, rejette un texte
+ * vide, recall("") = [], recall classe la mémoire PERTINENTE en tête (sémantique) avec un
+ * score dans (0,1], respecte topK, cognify renvoie {items:number}, clear vide. Un backend
+ * distant/async (cognee-rs) est normalisé par un `clear()` + `cognify()` avant recall.
+ *
+ * @param {() => (ICognitiveMemory | Promise<ICognitiveMemory>)} makeMemory Fabrique un adapter
+ *   FRAIS et isolé (le kit écrit/efface ; passer un namespace/projectId dédié pour un backend partagé).
+ * @param {object} [_opts] réservé (parité de signature avec les autres vérificateurs).
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkCognitiveMemoryConformance(makeMemory, _opts = {}) {
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+
+  /**
+   * @param {string} name
+   * @param {(m: ICognitiveMemory) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    let mem;
+    try {
+      mem = await makeMemory();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeMemory threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      if (typeof (/** @type {any} */ (mem)?.clear) === "function") await mem.clear();
+      await fn(mem);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    } finally {
+      try {
+        await (/** @type {any} */ (mem)?.clear?.());
+      } catch {
+        /* nettoyage best-effort */
+      }
+    }
+  };
+
+  await run("exposes the ICognitiveMemory surface + capabilities.backend", async (m) => {
+    for (const method of ["remember", "recall", "cognify", "count", "clear"]) {
+      if (typeof (/** @type {any} */ (m)[method]) !== "function") {
+        throw new Error(`missing method: ${method}`);
+      }
+    }
+    if (!m.capabilities || typeof m.capabilities.backend !== "string") {
+      throw new Error("capabilities.backend must be a string");
+    }
+  });
+
+  await run("remember() persists an item and count() reflects it", async (m) => {
+    const before = await m.count();
+    const item = await m.remember({ text: "the shared core is @ori3com/agent-core" });
+    if (!item || typeof item.id !== "string" || !item.id) throw new Error("remember() must return an item with a string id");
+    if (item.text !== "the shared core is @ori3com/agent-core") throw new Error("remember() must echo the stored text");
+    const after = await m.count();
+    if (after !== before + 1) throw new Error(`count() expected ${before + 1}, got ${after}`);
+  });
+
+  await run("remember() rejects empty text", async (m) => {
+    let threw = false;
+    try {
+      await m.remember(/** @type {any} */ ({ text: "   " }));
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error("remember() must reject empty/whitespace text");
+  });
+
+  await run("recall('') returns an empty array", async (m) => {
+    const hits = await m.recall("");
+    if (!Array.isArray(hits) || hits.length !== 0) throw new Error(`expected [], got ${JSON.stringify(hits)}`);
+  });
+
+  await run("recall() ranks the relevant memory first with a score in (0,1]", async (m) => {
+    await m.remember({ text: "we deploy with kubernetes helm charts on hetzner" });
+    await m.remember({ text: "lunch is usually served around noon each day" });
+    await m.cognify();
+    const hits = await m.recall("how do we deploy to kubernetes", 3);
+    if (!Array.isArray(hits) || hits.length === 0) throw new Error("recall() returned no hits for a matching query");
+    const top = hits[0];
+    if (!top.item || typeof top.item.text !== "string") throw new Error("recall() hit must carry item.text");
+    if (!top.item.text.toLowerCase().includes("kubernetes")) {
+      throw new Error(`top hit not the relevant memory: ${top.item.text}`);
+    }
+    if (!(top.score > 0 && top.score <= 1)) throw new Error(`score out of (0,1]: ${top.score}`);
+  });
+
+  await run("recall() respects the topK limit", async (m) => {
+    await m.remember({ text: "alpha config for the shared runtime" });
+    await m.remember({ text: "beta config for the shared runtime" });
+    await m.remember({ text: "gamma config for the shared runtime" });
+    await m.cognify();
+    const hits = await m.recall("shared runtime config", 1);
+    if (hits.length > 1) throw new Error(`topK=1 but got ${hits.length} hits`);
+  });
+
+  await run("cognify() reports { items: number }", async (m) => {
+    await m.remember({ text: "one consolidated memory" });
+    const res = await m.cognify();
+    if (!res || typeof res.items !== "number") throw new Error(`cognify() must return { items: number }, got ${JSON.stringify(res)}`);
+  });
+
+  await run("clear() empties the corpus", async (m) => {
+    await m.remember({ text: "temporary memory to be cleared" });
+    await m.clear();
+    if ((await m.count()) !== 0) throw new Error("count() must be 0 after clear()");
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
+/**
  * @param {unknown} err
  * @returns {string}
  */
