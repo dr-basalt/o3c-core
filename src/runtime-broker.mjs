@@ -18,6 +18,7 @@ import { toolResolverFromEnv } from "./tool-resolver.mjs";
 import { workflowRuntimeFromEnv } from "./workflow-runtime.mjs";
 import { createStorageLayer } from "./storage.mjs";
 import { llmFromEnv } from "./llm.mjs";
+import { saveCheckpoint, loadCheckpoint } from "./session-checkpoint.mjs";
 
 /**
  * @typedef {import("./ports.mjs").RuntimeScope} RuntimeScope
@@ -51,6 +52,8 @@ import { llmFromEnv } from "./llm.mjs";
  *
  * @typedef {Object} RuntimeBroker
  * @property {(workload: Workload, ctx: InvocationContext) => Promise<InvocationResult>} invoke
+ * @property {(ctx: InvocationContext, state: unknown) => Promise<{ key: string, envelope: any }>} [checkpoint] persiste l'état portable (handoff)
+ * @property {(ctx: InvocationContext) => Promise<any>} [restore] restaure l'état portable (reprise après handoff)
  */
 
 /** Kinds de workload reconnus (registre stable ; routé vers les ports C05). */
@@ -173,6 +176,28 @@ export class LocalRuntimeBroker {
         throw new Error(`UNKNOWN_WORKLOAD_KIND:${workload.kind}`);
     }
     return { placement: this.placement, kind: workload.kind, output };
+  }
+
+  /**
+   * Persiste l'état de session (.lbug + session) sur le storage account-keyed → le
+   * handoff est un simple checkpoint : un broker sur un AUTRE placement (wasm/edge/
+   * cloud) restaurera le MÊME état via `restore(ctx)`. Le storage est requis.
+   * @param {InvocationContext} ctx
+   * @param {unknown} state état opaque JSON-sérialisable
+   * @returns {Promise<{ key: string, envelope: import("./session-checkpoint.mjs").CheckpointEnvelope }>}
+   */
+  async checkpoint(ctx, state) {
+    return saveCheckpoint(this._require("storage"), ctx, state);
+  }
+
+  /**
+   * Restaure l'état de session depuis le checkpoint account-keyed (null si absent).
+   * Pendant du `checkpoint` : réalise la reprise après handoff.
+   * @param {InvocationContext} ctx
+   * @returns {Promise<import("./session-checkpoint.mjs").CheckpointEnvelope | null>}
+   */
+  async restore(ctx) {
+    return loadCheckpoint(this._require("storage"), ctx);
   }
 }
 

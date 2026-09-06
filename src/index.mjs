@@ -127,6 +127,19 @@ export {
   WORKLOAD_KINDS,
 } from "./runtime-broker.mjs";
 
+// C09 — SessionCheckpoint : handoff par checkpoint. L'état (.lbug + session) est persisté
+// sur l'IStorageLayer sous une clé ACCOUNT-KEYED déterministe → un broker sur tout
+// placement (local/wasm/edge/cloud) restaure le MÊME état (portabilité transparente).
+export {
+  saveCheckpoint,
+  loadCheckpoint,
+  deleteCheckpoint,
+  listCheckpoints,
+  checkpointKey,
+  CHECKPOINT_VERSION,
+  CHECKPOINT_PREFIX,
+} from "./session-checkpoint.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
