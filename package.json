@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "build": "node build.mjs",
     "verify:build": "node scripts/verify-build.mjs",
+    "smoke:wasm": "node build.mjs && node scripts/wasm-smoke.mjs",
     "leakscan": "node scripts/leakscan.mjs",
     "prepublishOnly": "npm run typecheck && npm test && npm run verify:build && npm run leakscan"
   },
@@ -27,6 +28,7 @@
   "devDependencies": {
     "@types/node": "^20.19.0",
     "esbuild": "^0.24.0",
+    "quickjs-emscripten": "^0.32.0",
     "typescript": "~5.6.3",
     "vitest": "^2.1.9"
   },

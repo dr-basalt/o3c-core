@@ -19,3 +19,6 @@ jobs:
       # C06 — hard-gate : construit ET vérifie les 2 cibles (node + WASM-friendly),
       # artefacts importables exposant les 8 ports + bundle WASM node-builtin-clean.
       - run: npm run verify:build
+      # C09 — smoke WASM EXÉCUTABLE : charge le bundle dans QuickJS-WASM et y fait
+      # tourner import + remember/recall (port + RuntimeBroker), pas juste « ne casse pas ».
+      - run: npm run smoke:wasm
