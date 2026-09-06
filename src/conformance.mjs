@@ -906,6 +906,121 @@ export async function checkToolResolverConformance(makeResolver, opts = {}) {
   return { ok: failed === 0, passed: checks.length - failed, failed, checks };
 }
 
+/**
+ * Vérifie qu'un RuntimeBroker (capstone C09, boîte-noire `invoke` + handoff par
+ * checkpoint) respecte le contrat COMPORTEMENTAL sur lequel l'IHM s'appuie — au-delà de
+ * la forme vérifiée par `assertRuntimeBroker`. Utile à un consommateur qui fournit son
+ * PROPRE broker (distribué : placement wasm/edge/cloud, handoff réel) : le contrat doit
+ * tenir quel que soit le placement, transparent pour l'appelant.
+ *
+ * Le broker fourni doit être câblé avec au moins un `ICognitiveMemory` (workloads de
+ * référence `memory.*`) et un `IStorageLayer` (checkpoint) — le jeu minimal pour prouver
+ * le routage ET le handoff. Les vérifs checkpoint/restore sont sautées si le broker
+ * n'expose pas ces méthodes (elles sont optionnelles dans le typedef RuntimeBroker).
+ *
+ * @param {() => any} makeBroker Fabrique un broker FRAIS (chaque vérif écrit de l'état).
+ * @param {object} [opts]
+ * @param {import("./ports.mjs").RuntimeScope} [opts.scope] Scope de test isolé.
+ * @returns {Promise<ConformanceReport>}
+ */
+export async function checkRuntimeBrokerConformance(makeBroker, opts = {}) {
+  const scope = opts.scope ?? { tenantId: "__conf_broker__", userId: "u", projectId: "p" };
+  const ctx = { scope };
+  /** @type {ConformanceCheck[]} */
+  const checks = [];
+
+  /**
+   * @param {string} name
+   * @param {(b: any) => Promise<void>} fn
+   */
+  const run = async (name, fn) => {
+    let broker;
+    try {
+      broker = await makeBroker();
+    } catch (err) {
+      checks.push({ name, ok: false, error: `makeBroker threw: ${errMsg(err)}` });
+      return;
+    }
+    try {
+      await fn(broker);
+      checks.push({ name, ok: true });
+    } catch (err) {
+      checks.push({ name, ok: false, error: errMsg(err) });
+    }
+  };
+
+  await run("exposes invoke(workload, ctx)", async (b) => {
+    if (typeof b.invoke !== "function") throw new Error("missing method: invoke");
+  });
+
+  await run("invoke() rejects a workload without a kind", async (b) => {
+    let threw = false;
+    try {
+      await b.invoke({}, ctx);
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error("expected invoke to reject a kind-less workload");
+  });
+
+  await run("invoke() rejects a ctx without scope.tenantId", async (b) => {
+    let threw = false;
+    try {
+      await b.invoke({ kind: "memory.recall", query: "x" }, { scope: {} });
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error("expected invoke to reject a scope-less ctx");
+  });
+
+  await run("invoke() rejects an unknown workload kind", async (b) => {
+    let threw = false;
+    try {
+      await b.invoke({ kind: "no.such.kind" }, ctx);
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error("expected invoke to reject an unknown kind");
+  });
+
+  await run("invoke() routes memory.* and returns a {placement, kind, output} envelope", async (b) => {
+    await b.invoke({ kind: "memory.remember", item: { text: "conformance broker fact alpha" } }, ctx);
+    const res = await b.invoke({ kind: "memory.recall", query: "alpha", k: 1 }, ctx);
+    if (!res || typeof res !== "object") throw new Error("invoke must return an envelope object");
+    if (typeof res.placement !== "string") throw new Error("envelope.placement (string) is required");
+    if (res.kind !== "memory.recall") throw new Error(`envelope.kind must echo the workload, got ${describe(res.kind)}`);
+    if (!("output" in res)) throw new Error("envelope.output is required");
+  });
+
+  await run("checkpoint() then restore() round-trips account-keyed session state", async (b) => {
+    if (typeof b.checkpoint !== "function" || typeof b.restore !== "function") return; // optionnel
+    const cpCtx = { scope, stateKey: "conf-sess" };
+    const state = { lbug: { pc: 3 }, note: "handoff ✓ état" };
+    await b.checkpoint(cpCtx, state);
+    const env = await b.restore(cpCtx);
+    if (!env) throw new Error("restore returned null after checkpoint");
+    if (JSON.stringify(env.state) !== JSON.stringify(state)) {
+      throw new Error(`restored state differs: ${JSON.stringify(env.state)}`);
+    }
+  });
+
+  await run("restore() returns null for an absent checkpoint", async (b) => {
+    if (typeof b.restore !== "function") return; // optionnel
+    const env = await b.restore({ scope, stateKey: "never-written" });
+    if (env !== null) throw new Error(`expected null, got ${describe(env)}`);
+  });
+
+  await run("checkpoints are isolated per account (tenant)", async (b) => {
+    if (typeof b.checkpoint !== "function" || typeof b.restore !== "function") return; // optionnel
+    await b.checkpoint({ scope, stateKey: "iso" }, { secret: 1 });
+    const other = await b.restore({ scope: { ...scope, tenantId: "__conf_other__" }, stateKey: "iso" });
+    if (other !== null) throw new Error("a different tenant must not read this account's checkpoint");
+  });
+
+  const failed = checks.filter((c) => !c.ok).length;
+  return { ok: failed === 0, passed: checks.length - failed, failed, checks };
+}
+
 // ── Registre + dispatcher — un vérificateur par port substituable ──────────────
 
 /**
