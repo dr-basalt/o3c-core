@@ -65,6 +65,18 @@ export {
   S3_PACKAGE,
 } from "./storage.mjs";
 
+// C05 — IToolResolver (ADR §3, combinable) : tools OPAQUES, découplés de Mastra/
+// Nango/DB. StaticToolResolver + CombinedToolResolver (first-registered wins, échecs
+// isolés) + createToolResolver/toolResolverFromEnv (backends injectés, gracieux).
+export {
+  StaticToolResolver,
+  CombinedToolResolver,
+  EmptyToolResolver,
+  createToolResolver,
+  toolResolverFromEnv,
+  assertToolResolver,
+} from "./tool-resolver.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
