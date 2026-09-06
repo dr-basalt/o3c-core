@@ -21,6 +21,50 @@
  */
 
 /**
+ * ILLM — seam de génération, openai-compatible et canal-agnostique (impl : `llm.mjs`,
+ * C04). Route via api.ori3com.cloud ; `CascadeLLM` chaîne SLM local → cloud. Contrat
+ * volontairement petit (chat non-streamé) ; le streaming reste du ressort du runtime
+ * consommateur, qui peut re-résoudre `model` via son propre provider.
+ *
+ * @typedef {Object} ChatMessage
+ * @property {'system' | 'user' | 'assistant' | 'tool'} role
+ * @property {string} content
+ *
+ * @typedef {Object} ChatRequest
+ * @property {ChatMessage[]} messages
+ * @property {string} [model] Écrase le modèle par défaut du provider.
+ * @property {number} [temperature]
+ * @property {number} [maxTokens]
+ * @property {string[]} [stop]
+ *
+ * @typedef {Object} ChatUsage
+ * @property {number} [promptTokens]
+ * @property {number} [completionTokens]
+ * @property {number} [totalTokens]
+ *
+ * @typedef {Object} ChatResult
+ * @property {string} text Contenu du 1er choix (chaîne vide si aucun).
+ * @property {string} model Modèle effectif renvoyé par le backend.
+ * @property {string} [finishReason]
+ * @property {ChatUsage} [usage]
+ * @property {string} provider Identifiant du provider ayant répondu (utile en cascade).
+ *
+ * @typedef {Object} ILLM
+ * @property {(req: ChatRequest) => Promise<ChatResult>} chat
+ * @property {string} model modèle par défaut du provider
+ * @property {string} name identifiant du provider (ex. 'litellm', 'slm-local')
+ */
+
+/**
+ * ModelDescriptor — modèle LLM PORTABLE résolu par le seam (agent-factory C04).
+ * `chat` est lié à `id` ; le consommateur peut aussi re-résoudre `id` via son runtime.
+ * @typedef {Object} ModelDescriptor
+ * @property {string} id
+ * @property {string} provider
+ * @property {(req: Omit<ChatRequest, 'model'>) => Promise<ChatResult>} chat
+ */
+
+/**
  * IVectorMemory — mémoire vectorielle edge, partitionnée par namespace (projectId).
  * @typedef {Object} VectorDoc
  * @property {string} id

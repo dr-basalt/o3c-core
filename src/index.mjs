@@ -26,6 +26,17 @@ export {
   COGNEE_PACKAGE,
 } from "./cognitive-memory.mjs";
 
+// C04 — seam LLM : client openai-compatible (api.ori3com.cloud) + cascade SLM local
+// + seam `fromEnv`/`modelProvider` branché sur materializeAgent (WASM-friendly, pas
+// de dépendance @ai-sdk/@mastra dans le cœur).
+export {
+  LiteLLMChat,
+  CascadeLLM,
+  llmFromEnv,
+  createModelProvider,
+  modelProviderFromEnv,
+} from "./llm.mjs";
+
 /**
  * @typedef {import("./agent-spec.mjs").AgentSpec} AgentSpec
  * @typedef {import("./scope.mjs").RuntimeScope} RuntimeScope
@@ -34,4 +45,8 @@ export {
  * @typedef {import("./ports.mjs").ICognitiveMemory} ICognitiveMemory
  * @typedef {import("./ports.mjs").MemoryItem} MemoryItem
  * @typedef {import("./ports.mjs").RecallHit} RecallHit
+ * @typedef {import("./ports.mjs").ILLM} ILLM
+ * @typedef {import("./ports.mjs").ChatRequest} ChatRequest
+ * @typedef {import("./ports.mjs").ChatResult} ChatResult
+ * @typedef {import("./ports.mjs").ModelDescriptor} ModelDescriptor
  */
