@@ -1,9 +1,11 @@
 # ADR-0001 — `@ori3com/agent-core` : le socle agent partagé, canal-agnostique
 
-> Statut : **Proposé** (2026-09-06) · Repo dédié `dr-basalt/o3c-core` (doctrine « repo séparé »,
-> cf. `o3c-chat/.planning/adr/ADR-o3c-origin.md`). Décline `ADR-o3c-cognitive-engine.md` et
-> `ADR-o3c-systeme-origin.md` (§3 core). Source d'extraction : `o3c-chat/packages/agent-runtime`
-> (`@ori3com/agent-runtime`, déjà porté + testé par le loop o3c-systeme-origin).
+> Statut : **Accepté — livré C01→C09** (2026-09-07 ; proposé 2026-09-06). Publication npm (C07)
+> **DEPTH-BLOCKED** sur `NPM_TOKEN` (scaffolding livré, publish gated). · Repo dédié
+> `dr-basalt/o3c-core` (doctrine « repo séparé », cf. `o3c-chat/.planning/adr/ADR-o3c-origin.md`).
+> Décline `ADR-o3c-cognitive-engine.md` et `ADR-o3c-systeme-origin.md` (§3 core). Source
+> d'extraction : `o3c-chat/packages/agent-runtime` (`@ori3com/agent-runtime`, déjà porté + testé
+> par le loop o3c-systeme-origin).
 
 ---
 
@@ -33,20 +35,25 @@ sur certains hôtes → fallback/WASM · publication gated `NPM_TOKEN`.
 
 ## 4. Roadmap phases (Cxx — DoD tests-first : typecheck+build+tests VERTS, pas de squelette)
 
-- **C01 — Skeleton package** : `@ori3com/agent-core`, ESM, build esbuild multi-cible (node + wasm-friendly),
+> État de livraison (2026-09-07) : **C01–C06, C08, C09 ✅ livrés** (typecheck + vitest verts, vrai
+> code) ; **C07 ⏳ DEPTH-BLOCKED** — scaffolding de publication livré (allowlist, provenance,
+> leakscan, `prepublishOnly`), publish npm réel gated sur `NPM_TOKEN` (secret absent).
+
+- **C01 ✅ — Skeleton package** : `@ori3com/agent-core`, ESM, build esbuild multi-cible (node + wasm-friendly),
   exports typés des ports, CI test. Smoke `import { ... } from '@ori3com/agent-core'`.
-- **C02 — Extraire ports + ContextBuilder + Embedder + agent-factory** depuis `o3c-chat/packages/agent-runtime`
+- **C02 ✅ — Extraire ports + ContextBuilder + Embedder + agent-factory** depuis `o3c-chat/packages/agent-runtime`
   (copie/refactor, **découplé de tout o3c-chat-specific** : pas de chatindex-sidecar, pas de BFF).
-- **C03 — `ICognitiveMemory` unifié** : adapter cognee-rs (`@cognee/cognee-ts`, probe natif) + fallback
+- **C03 ✅ — `ICognitiveMemory` unifié** : adapter cognee-rs (`@cognee/cognee-ts`, probe natif) + fallback
   pur-JS (TF·IDF) — **reprendre/converger l'impl P02 de o3c-code-cli**. Contract-tests.
-- **C04 — Seam LLM** : `llmFromEnv()` → `api.ori3com.cloud` (openai-compatible) + cascade SLM local. IT live.
-- **C05 — `fromEnv` seams** : sélection substituable des backends (memory/vector/graph/storage) par env,
+- **C04 ✅ — Seam LLM** : `llmFromEnv()` → `api.ori3com.cloud` (openai-compatible) + cascade SLM local. IT live.
+- **C05 ✅ — `fromEnv` seams** : sélection substituable des backends (memory/vector/graph/storage) par env,
   natives en dynamic-import (jamais tirées quand non utilisées). Dégradation réversible.
-- **C06 — Build targets verts** : node natif **et** cible WASM-friendly ; contract-tests sur les 2 chemins.
-- **C07 — Publication npm** `@ori3com/agent-core` (files allowlist, provenance, leakscan) — gated `NPM_TOKEN`.
-- **C08 — Convergence consommateurs** : o3c-code-cli + chat2 `agent-runtime` dépendent de `@ori3com/agent-core`
+- **C06 ✅ — Build targets verts** : node natif **et** cible WASM-friendly ; contract-tests sur les 2 chemins.
+- **C07 ⏳ — Publication npm** `@ori3com/agent-core` (files allowlist, provenance, leakscan) — **DEPTH-BLOCKED** :
+  scaffolding + `prepublishOnly` livrés, `npm publish` réel gated `NPM_TOKEN` (secret absent).
+- **C08 ✅ — Convergence consommateurs** : o3c-code-cli + chat2 `agent-runtime` dépendent de `@ori3com/agent-core`
   (retirer les impls dupliquées) ; IT de non-régression côté consommateurs.
-- **C09 — Cible WASM EXÉCUTABLE + hook RuntimeBroker** (au-delà du « wasm-friendly » de C06) : produire un
+- **C09 ✅ — Cible WASM EXÉCUTABLE + hook RuntimeBroker** (au-delà du « wasm-friendly » de C06) : produire un
   artefact `@ori3com/agent-core` **réellement exécutable en WASM** (navigateur / Cloudflare Worker / WebVM) —
   cœur Mastra+ports en WASM, cognee-rs via son core Rust→WASM (fallback pur-JS sinon), LLM via fetch
   `api.ori3com.cloud`. **DoD** : un smoke réel « import + `remember`/`recall` » tourne **dans un runtime WASM**
