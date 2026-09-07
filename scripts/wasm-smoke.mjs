@@ -17,7 +17,7 @@ const root = resolve(fileURLToPath(import.meta.url), "..", "..");
 // globalThis.__result (ou l'erreur dans __err). N'utilise que des builtins ECMAScript
 // (le chemin local des ports est pur : ni node:, ni fetch, ni TextEncoder requis).
 const SCENARIO = `
-import { createCognitiveMemory, runtimeBrokerFromEnv, LocalRuntimeBroker, MemoryStorageLayer, VERSION } from 'agent-core';
+import { createCognitiveMemory, runtimeBrokerFromEnv, LocalRuntimeBroker, MemoryStorageLayer, LiteLLMChat, VERSION } from 'agent-core';
 globalThis.__result = null; globalThis.__err = null;
 (async () => {
   try {
@@ -51,6 +51,27 @@ globalThis.__result = null; globalThis.__err = null;
     // deux brokers partageant une mémoire à l'intérieur du même runtime.
     const cpBytes = await storage.get(cp.key);
 
+    // 5) Seam LLM VIA FETCH dans le runtime WASM (clause C09 « LLM via fetch
+    // api.ori3com.cloud »). Un fetchImpl injecté (openai-compatible) évite le réseau ;
+    // on prouve que le client POSTe bien sur baseURL + /chat/completions et décode la
+    // réponse — le MÊME code frapperait api.ori3com.cloud sur un vrai runtime WASM.
+    let llmUrl = null;
+    const fetchStub = async (url) => {
+      llmUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          model: 'o3c-equilibre',
+          choices: [{ message: { content: 'pong from wasm' }, finish_reason: 'stop' }],
+          usage: { total_tokens: 3 },
+        }),
+      };
+    };
+    const llm = new LiteLLMChat({ baseURL: 'https://api.ori3com.cloud/v1', apiKey: 'k', model: 'o3c-equilibre', fetchImpl: fetchStub });
+    const llmBroker = new LocalRuntimeBroker({ llm, placement: 'wasm' });
+    const chat = await llmBroker.invoke({ kind: 'llm.chat', request: { messages: [{ role: 'user', content: 'ping' }] } }, ctx);
+
     globalThis.__result = JSON.stringify({
       version: VERSION,
       backend,
@@ -61,6 +82,9 @@ globalThis.__result = null; globalThis.__err = null;
       checkpointPc: restored && restored.state && restored.state.lbug && restored.state.lbug.pc,
       checkpointKey: cp.key,
       checkpointBytes: Array.from(cpBytes),
+      llmText: chat.output && chat.output.text,
+      llmProvider: chat.output && chat.output.provider,
+      llmUrl,
     });
   } catch (e) { globalThis.__err = String((e && e.message) || e); }
 })();
@@ -130,6 +154,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     // Les octets bruts du checkpoint (écrits DANS WASM) sont exportés → restaurables en natif.
     if (!result.checkpointKey || !Array.isArray(result.checkpointBytes) || !result.checkpointBytes.length) {
       throw new Error("WASM smoke: checkpoint bytes not exported for cross-runtime handoff");
+    }
+    // Le seam LLM (fetch openai-compatible) a tourné DANS WASM et a POSTé sur api.ori3com.cloud.
+    if (result.llmText !== "pong from wasm" || result.llmUrl !== "https://api.ori3com.cloud/v1/chat/completions") {
+      throw new Error(`WASM smoke: LLM seam did not run via fetch — ${JSON.stringify(result)}`);
     }
     console.log(`wasm-smoke: import + remember/recall + checkpoint handoff ran in ${engine} ✓`);
     console.log(`  version=${result.version} backend=${result.backend} placement=${result.brokerPlacement}`);

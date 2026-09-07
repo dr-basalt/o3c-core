@@ -36,6 +36,16 @@ describe("C09 — core executes inside a real WASM runtime", () => {
     expect(result.checkpointPc).toBe(7);
   }, 60_000);
 
+  it("runs the LLM seam via fetch to api.ori3com.cloud inside the WASM runtime", async () => {
+    // Clause C09 « LLM via fetch api.ori3com.cloud » : le client openai-compatible POSTe
+    // sur `<baseURL>/chat/completions` et décode la réponse — exécuté DANS QuickJS-WASM,
+    // fetch injecté (hors réseau). Prouve que le seam de génération est WASM-exécutable.
+    const { result } = await runWasmSmoke();
+    expect(result.llmUrl).toBe("https://api.ori3com.cloud/v1/chat/completions");
+    expect(result.llmText).toBe("pong from wasm");
+    expect(result.llmProvider).toBe("litellm");
+  }, 60_000);
+
   it("hands the WASM-written checkpoint off to native Node (cross-runtime restore)", async () => {
     // La vraie promesse de handoff C09 : un checkpoint écrit sur UN runtime est restauré sur
     // UN AUTRE. On rejoue les octets bruts produits DANS WASM dans un storage NATIF et on
