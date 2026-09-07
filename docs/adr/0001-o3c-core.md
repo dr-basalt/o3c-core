@@ -35,9 +35,11 @@ sur certains hôtes → fallback/WASM · publication gated `NPM_TOKEN`.
 
 ## 4. Roadmap phases (Cxx — DoD tests-first : typecheck+build+tests VERTS, pas de squelette)
 
-> État de livraison (2026-09-07) : **C01–C06, C08, C09 ✅ livrés** (typecheck + vitest verts, vrai
+> État de livraison (2026-09-07) : **C01–C06, C09 ✅ livrés** (typecheck + vitest verts, vrai
 > code) ; **C07 ⏳ DEPTH-BLOCKED** — scaffolding de publication livré (allowlist, provenance,
-> leakscan, `prepublishOnly`), publish npm réel gated sur `NPM_TOKEN` (secret absent).
+> leakscan, `prepublishOnly`), publish npm réel gated sur `NPM_TOKEN` (secret absent) ;
+> **C08 ⏳ DEPTH-BLOCKED** — aucun consommateur réel (grep `@ori3com/agent-core` = 0 dans
+> o3c-code-cli + o3c-chat, lockfile = 0) ; déblocage impossible avant C07 (package non publié).
 
 - **C01 ✅ — Skeleton package** : `@ori3com/agent-core`, ESM, build esbuild multi-cible (node + wasm-friendly),
   exports typés des ports, CI test. Smoke `import { ... } from '@ori3com/agent-core'`.
@@ -51,8 +53,12 @@ sur certains hôtes → fallback/WASM · publication gated `NPM_TOKEN`.
 - **C06 ✅ — Build targets verts** : node natif **et** cible WASM-friendly ; contract-tests sur les 2 chemins.
 - **C07 ⏳ — Publication npm** `@ori3com/agent-core` (files allowlist, provenance, leakscan) — **DEPTH-BLOCKED** :
   scaffolding + `prepublishOnly` livrés, `npm publish` réel gated `NPM_TOKEN` (secret absent).
-- **C08 ✅ — Convergence consommateurs** : o3c-code-cli + chat2 `agent-runtime` dépendent de `@ori3com/agent-core`
+- **C08 ⏳ — Convergence consommateurs** : o3c-code-cli + chat2 `agent-runtime` dépendent de `@ori3com/agent-core`
   (retirer les impls dupliquées) ; IT de non-régression côté consommateurs.
+  **DEPTH-BLOCKED reason=NPM_TOKEN** : dépend de C07 (package publié) — impossible d'importer un
+  package privé/non-publié. Aujourd'hui o3c-code-cli a sa propre `ICognitiveMemory` locale (`src/agent-core/memory/`)
+  et chat2 a `@ori3com/agent-runtime` local : deux impls dupliquées non convergées. Vérification : 2026-09-07,
+  `grep -rn "@ori3com/agent-core" o3c-code-cli/ o3c-chat/` = **0 résultat**.
 - **C09 ✅ — Cible WASM EXÉCUTABLE + hook RuntimeBroker** (au-delà du « wasm-friendly » de C06) : produire un
   artefact `@ori3com/agent-core` **réellement exécutable en WASM** (navigateur / Cloudflare Worker / WebVM) —
   cœur Mastra+ports en WASM, cognee-rs via son core Rust→WASM (fallback pur-JS sinon), LLM via fetch
