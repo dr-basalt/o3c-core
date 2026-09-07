@@ -120,4 +120,13 @@ describe("RuntimeBroker capstone section stays in sync with the code (C09)", () 
     // La carte des ports reste exactement PORT_NAMES (le broker n'y est pas).
     expect(Object.keys(PORT_CONFORMANCE)).not.toContain("RuntimeBroker");
   });
+
+  it("documents the cross-instance handoff guarantee + its shared-storage requirement", () => {
+    // Anti-dérive : le guide doit dire aux consommateurs que le kit prouve le handoff
+    // ENTRE instances (placements distincts) et que leur fabrique doit partager le storage
+    // account-keyed — la garantie centrale C09, sinon le contrat documenté ment.
+    expect(GUIDE).toMatch(/second instance|cross-instance/i);
+    expect(GUIDE).toMatch(/different placement/i);
+    expect(GUIDE).toMatch(/MUST share the same account-keyed/i);
+  });
 });

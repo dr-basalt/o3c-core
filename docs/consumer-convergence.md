@@ -143,13 +143,20 @@ checkpoints inside WASM and another placement restores it losslessly.
 
 **Verify your own broker.** A consumer providing a *distributed* broker (real handoff)
 proves the contract the UI relies on with `checkRuntimeBrokerConformance` — invoke
-validation, unknown-kind rejection, the `{placement, kind, output}` envelope, and the
-account-keyed checkpoint round-trip + per-tenant isolation (the last three skipped
-gracefully if the broker omits `checkpoint`/`restore`):
+validation, unknown-kind rejection, the `{placement, kind, output}` envelope, the
+account-keyed checkpoint round-trip, per-tenant isolation, and — the heart of C09 — that a
+checkpoint written by one broker instance is **restored by a second instance on a different
+placement** (the checkpoint/handoff checks skip gracefully if the broker omits
+`checkpoint`/`restore`):
 
 ```js
 import { checkRuntimeBrokerConformance } from "@ori3com/agent-core/conformance";
-const report = await checkRuntimeBrokerConformance(() => new MyDistributedBroker());
+// The factory is called more than once; the instances MUST share the same account-keyed
+// storage (external object store — never an in-memory layer built per call), or the
+// cross-instance handoff check fails. That failure is the point: two placements that can't
+// see each other's checkpoints are not a handoff.
+const shared = makeMyAccountKeyedStore();
+const report = await checkRuntimeBrokerConformance(() => new MyDistributedBroker({ storage: shared }));
 expect(report.ok).toBe(true);
 ```
 
