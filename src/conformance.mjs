@@ -918,7 +918,12 @@ export async function checkToolResolverConformance(makeResolver, opts = {}) {
  * le routage ET le handoff. Les vérifs checkpoint/restore sont sautées si le broker
  * n'expose pas ces méthodes (elles sont optionnelles dans le typedef RuntimeBroker).
  *
- * @param {() => any} makeBroker Fabrique un broker FRAIS (chaque vérif écrit de l'état).
+ * `makeBroker` est appelé plusieurs fois : deux instances DOIVENT partager le MÊME storage
+ * account-keyed (externe : S3/objet, pas un in-memory par-instance), sinon la vérif de
+ * handoff cross-instance échoue — c'est précisément la garantie C09 (le placement change,
+ * l'état account-keyed est le même). Un broker mono-placement sans `restore` est ignoré.
+ *
+ * @param {() => any} makeBroker Fabrique un broker FRAIS partageant le storage account-keyed.
  * @param {object} [opts]
  * @param {import("./ports.mjs").RuntimeScope} [opts.scope] Scope de test isolé.
  * @returns {Promise<ConformanceReport>}
@@ -1015,6 +1020,34 @@ export async function checkRuntimeBrokerConformance(makeBroker, opts = {}) {
     await b.checkpoint({ scope, stateKey: "iso" }, { secret: 1 });
     const other = await b.restore({ scope: { ...scope, tenantId: "__conf_other__" }, stateKey: "iso" });
     if (other !== null) throw new Error("a different tenant must not read this account's checkpoint");
+  });
+
+  await run("checkpoint hands off across broker instances (different placement, shared account-keyed storage)", async (b) => {
+    if (typeof b.checkpoint !== "function") return; // optionnel
+    // LE cœur de C09 : le handoff. Un SECOND broker, construit indépendamment, joue un
+    // AUTRE placement (wasm/edge/cloud) au-dessus du MÊME storage account-keyed. Comme la
+    // clé ne dépend que de (scope, stateKey), il doit restaurer ce que `b` a écrit — sans
+    // partage d'objet en mémoire, uniquement via le storage. Un broker mono-placement qui
+    // n'expose pas restore est ignoré ; un broker « handoff » qui échoue ici n'en est pas un.
+    let b2;
+    try {
+      b2 = await makeBroker();
+    } catch (err) {
+      throw new Error(`second makeBroker threw: ${errMsg(err)}`);
+    }
+    if (typeof b2.restore !== "function") return;
+    const hoCtx = { scope, stateKey: "handoff-xinst" };
+    const state = { lbug: { pc: 9 }, note: "cross-placement ✓ état" };
+    await b.checkpoint(hoCtx, state);
+    const env = await b2.restore(hoCtx);
+    if (!env) {
+      throw new Error(
+        "a second broker instance restored null — no handoff (storage not shared or not account-keyed?)"
+      );
+    }
+    if (JSON.stringify(env.state) !== JSON.stringify(state)) {
+      throw new Error(`handoff state differs across instances: ${JSON.stringify(env.state)}`);
+    }
   });
 
   const failed = checks.filter((c) => !c.ok).length;

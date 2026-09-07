@@ -11,7 +11,24 @@ import { LocalRuntimeBroker } from "../src/runtime-broker.mjs";
 import { LocalCognitiveMemory } from "../src/cognitive-memory.mjs";
 import { MemoryStorageLayer } from "../src/storage.mjs";
 
-/** Broker de référence câblé avec le jeu minimal (cognitive + storage). */
+/**
+ * Broker de référence câblé avec le jeu minimal (cognitive + storage). Le storage est
+ * PARTAGÉ entre instances (via `shared`) pour modéliser un storage account-keyed externe :
+ * deux brokers = deux placements au-dessus du MÊME état → la vérif de handoff cross-instance
+ * peut réussir. Chaque appel varie le `placement` pour prouver que le handoff est opaque.
+ * @param {import("../src/storage.mjs").MemoryStorageLayer} [shared]
+ */
+function makeSharedRefBroker(shared) {
+  let n = 0;
+  return () =>
+    new LocalRuntimeBroker({
+      cognitive: new LocalCognitiveMemory(),
+      storage: shared,
+      placement: ["local", "wasm", "edge", "cloud"][n++ % 4],
+    });
+}
+
+/** Broker de référence à storage isolé par instance (pas de handoff cross-instance). */
 function makeRefBroker() {
   return new LocalRuntimeBroker({
     cognitive: new LocalCognitiveMemory(),
@@ -22,12 +39,24 @@ function makeRefBroker() {
 
 describe("checkRuntimeBrokerConformance", () => {
   it("passes for the reference LocalRuntimeBroker (invoke + checkpoint handoff)", async () => {
-    const report = await checkRuntimeBrokerConformance(makeRefBroker);
+    const report = await checkRuntimeBrokerConformance(makeSharedRefBroker(new MemoryStorageLayer()));
     const failed = report.checks.filter((c) => !c.ok);
     expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
     expect(report.ok).toBe(true);
-    // Les 8 vérifs (validation + routage + 3 de handoff) doivent avoir tourné.
-    expect(report.passed).toBe(8);
+    // Les 9 vérifs (validation + routage + 4 de handoff, dont le cross-instance) ont tourné.
+    expect(report.passed).toBe(9);
+  });
+
+  it("fails the cross-instance handoff check when storage is not shared across placements", async () => {
+    // Chaque instance a son PROPRE storage in-memory : le round-trip mono-instance passe,
+    // mais un second broker ne voit rien → pas de handoff. C'est exactement ce que la vérif
+    // cross-instance attrape (là où le round-trip simple, lui, resterait vert à tort).
+    const report = await checkRuntimeBrokerConformance(makeRefBroker);
+    expect(report.ok).toBe(false);
+    const failed = report.checks.filter((c) => !c.ok).map((c) => c.name);
+    expect(failed).toEqual([
+      "checkpoint hands off across broker instances (different placement, shared account-keyed storage)",
+    ]);
   });
 
   it("skips checkpoint/restore checks gracefully when the broker omits them", async () => {
