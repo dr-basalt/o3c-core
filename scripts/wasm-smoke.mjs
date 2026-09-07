@@ -41,9 +41,15 @@ globalThis.__result = null; globalThis.__err = null;
     const storage = new MemoryStorageLayer();
     const cpCtx = { scope: { tenantId: 'acct', projectId: 'wasm-smoke' }, stateKey: 'conv-1' };
     const writer = new LocalRuntimeBroker({ storage, placement: 'wasm' });
-    await writer.checkpoint(cpCtx, { lbug: { pc: 7 }, draft: 'résumé ✅ élève' });
+    const cp = await writer.checkpoint(cpCtx, { lbug: { pc: 7 }, draft: 'résumé ✅ élève' });
     const reader = new LocalRuntimeBroker({ storage, placement: 'edge' });
     const restored = await reader.restore(cpCtx);
+
+    // 4) Portabilité CROSS-RUNTIME : exporte les octets bruts du checkpoint (écrits DANS
+    // WASM) + sa clé account-keyed, pour que le harnais NATIF (Node) les restaure hors WASM.
+    // Prouve que le format de checkpoint franchit la frontière WASM↔natif, pas seulement
+    // deux brokers partageant une mémoire à l'intérieur du même runtime.
+    const cpBytes = await storage.get(cp.key);
 
     globalThis.__result = JSON.stringify({
       version: VERSION,
@@ -53,6 +59,8 @@ globalThis.__result = null; globalThis.__err = null;
       brokerTop: via.output[0] && via.output[0].item.text,
       checkpointDraft: restored && restored.state && restored.state.draft,
       checkpointPc: restored && restored.state && restored.state.lbug && restored.state.lbug.pc,
+      checkpointKey: cp.key,
+      checkpointBytes: Array.from(cpBytes),
     });
   } catch (e) { globalThis.__err = String((e && e.message) || e); }
 })();
@@ -118,6 +126,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     // sans perte, y compris sur des caractères multi-octets / emoji.
     if (result.checkpointDraft !== "résumé ✅ élève" || result.checkpointPc !== 7) {
       throw new Error(`unexpected checkpoint restore: ${JSON.stringify(result)}`);
+    }
+    // Les octets bruts du checkpoint (écrits DANS WASM) sont exportés → restaurables en natif.
+    if (!result.checkpointKey || !Array.isArray(result.checkpointBytes) || !result.checkpointBytes.length) {
+      throw new Error("WASM smoke: checkpoint bytes not exported for cross-runtime handoff");
     }
     console.log(`wasm-smoke: import + remember/recall + checkpoint handoff ran in ${engine} ✓`);
     console.log(`  version=${result.version} backend=${result.backend} placement=${result.brokerPlacement}`);
